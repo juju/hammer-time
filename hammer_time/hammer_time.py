@@ -162,6 +162,7 @@ def execute_plan(plan_file, juju_data):
     with connected_model(loop, specific_juju_data) as juju_model:
         run_glitch(plan_file, juju_model)
     loop.close()
+    client.wait_for_started()
 
 
 def main():
