@@ -6,5 +6,6 @@ share/*
 src/*
 *.swp
 .python-canary
-hammer_time.egg-info/*
+*.egg-info/*
 plan.yaml
+__pycache__

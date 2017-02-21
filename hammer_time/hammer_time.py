@@ -13,6 +13,11 @@ from juju.client.connection import (
     JujuData,
     )
 from juju.model import Model
+from jujupy import (
+    get_client_class,
+    ModelClient,
+    )
+from jujupy.client import Controller
 import yaml
 
 from matrix.bus import Bus
@@ -131,14 +136,36 @@ def run_glitch(plan_file, juju_model):
         return True
 
 
+def make_juju_data(cls, specific_juju_data):
+    current_controller = specific_juju_data.current_controller()
+    models = specific_juju_data.models()
+    current_model = models[current_controller]['current-model']
+    env = cls(
+        current_model, controller=Controller(current_controller),
+        juju_home=specific_juju_data.path)
+    return env
+
+
 def execute_plan(plan_file, juju_data):
+    full_path = None
+    if full_path is None:
+        full_path = ModelClient.get_full_path()
+    version = ModelClient.get_version(full_path)
+    client_class = get_client_class(str(version))
+    specific_juju_data = SpecificJujuData(juju_data)
+    env = make_juju_data(client_class.config_class, specific_juju_data)
+    client = client_class(env, version, full_path)
+
+    client.wait_for_started()
+
     loop = asyncio.get_event_loop()
-    with connected_model(loop, SpecificJujuData(juju_data)) as juju_model:
+    with connected_model(loop, specific_juju_data) as juju_model:
         run_glitch(plan_file, juju_model)
     loop.close()
 
 
 def main():
+    logging.getLogger().setLevel(logging.INFO)
     args = parse_args()
     kwargs = dict((k, v) for k, v in vars(args).items()
                   if k not in ('func', 'cmd'))

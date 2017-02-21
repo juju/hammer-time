@@ -14,6 +14,7 @@ SETUP = {
     'entry_points': {
         'console_scripts': [
             'hammer-time = hammer_time.hammer_time:main',
+            'h-time = hammer_time.hammer_time:main',
         ]
     },
     'install_requires': reqs,
