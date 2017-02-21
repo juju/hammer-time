@@ -96,12 +96,33 @@ def parse_args():
     return parser.parse_args()
 
 
+def is_workable_plan(client, plan):
+    """Check whether the current plan is workable.
+    """
+    for action in plan['actions']:
+        if action['action'] == 'remove_unit':
+            status = client.get_status()
+            for selector in action['selectors']:
+                if selector['selector'] == 'units':
+                    applications = status.get_applications()
+                    units = applications[selector['application']]['units']
+                    if len(units) < 2:
+                        return False
+    return True
+
+
+
 def make_plan(plan_file, juju_data, action_count):
     loop = asyncio.get_event_loop()
-    juju_data_obj = SpecificJujuData(juju_data)
-    with connected_model(loop, juju_data_obj) as model:
-        plan = loop.run_until_complete(
-            generate_plan(None, model, action_count))
+    specific_juju_data = SpecificJujuData(juju_data)
+    client = make_model_client(specific_juju_data)
+    with connected_model(loop, specific_juju_data) as model:
+        while True:
+            plan = loop.run_until_complete(
+                generate_plan(None, model, action_count))
+            if is_workable_plan(client, plan):
+                break
+            print('Generated unworkable plan.  Trying again.')
     loop.close()
     with open(plan_file, 'w') as f:
         yaml.safe_dump(plan, f)
@@ -146,16 +167,20 @@ def make_juju_data(cls, specific_juju_data):
     return env
 
 
-def execute_plan(plan_file, juju_data):
+def make_model_client(specific_juju_data):
     full_path = None
     if full_path is None:
         full_path = ModelClient.get_full_path()
     version = ModelClient.get_version(full_path)
     client_class = get_client_class(str(version))
-    specific_juju_data = SpecificJujuData(juju_data)
     env = make_juju_data(client_class.config_class, specific_juju_data)
     client = client_class(env, version, full_path)
+    return client
 
+
+def execute_plan(plan_file, juju_data):
+    specific_juju_data = SpecificJujuData(juju_data)
+    client = make_model_client(specific_juju_data)
     client.wait_for_started()
 
     loop = asyncio.get_event_loop()
