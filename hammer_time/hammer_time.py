@@ -23,7 +23,7 @@ import yaml
 from matrix.bus import Bus
 from matrix import model
 from matrix.tasks.glitch.plan import generate_plan
-from matrix.tasks.glitch.main import glitch
+from matrix.tasks.glitch.main import perform_action
 
 
 class NoCurrentController(Exception):
@@ -51,12 +51,21 @@ class SpecificJujuData(JujuData):
         return output.get('current-controller', '')
 
 
-@contextmanager
-def connected_model(loop, jujudata):
+def get_current(jujudata):
+    """Return current controller and model."""
     controller_name = jujudata.current_controller()
     if controller_name == '':
         raise NoCurrentController(
             'Juju has no current controller at {}'.format(jujudata.path))
+    models = jujudata.models()[controller_name]
+    model_name = models['current-model']
+    model_uuid = models['models'][model_name]['uuid']
+    return controller_name, model_name, model_uuid
+
+
+@contextmanager
+def connected_model(loop, jujudata):
+    controller_name, model_name, model_uuid = get_current(jujudata)
     controller = jujudata.controllers()[controller_name]
     try:
         endpoint = controller['api-endpoints'][0]
@@ -67,8 +76,6 @@ def connected_model(loop, jujudata):
     username = accounts['user']
     password = accounts.get('password')
     macaroons = get_macaroons() if not password else None
-    models = jujudata.models()[controller_name]
-    model_uuid = models['models'][models['current-model']]['uuid']
     model = Model(loop)
     loop.run_until_complete(model.connect(
         endpoint, model_uuid, username, password, cacert, macaroons,
@@ -129,38 +136,19 @@ def make_plan(plan_file, juju_data, action_count):
 
 
 def run_glitch(plan_file, juju_model):
-    """This function runs a specified glitch plan against a model.
-
-    Exceptions are logged to glitch.log.
-
-    It returns True if glitch ran successfully, False if exceptions were
-    raised.
-    """
-    loop = juju_model.loop
-    bus = Bus(loop=loop)
-    suite = []
-
-    class config:
-        path = None
-
+    with open(plan_file) as f:
+        plan = yaml.safe_load(f)
     task = model.Task(command='glitch', args={'plan': plan_file, 'path': None})
-
     rule = model.Rule(task)
-
-    context = model.Context(loop, bus, suite, config, None)
-    context.juju_model = juju_model
-    try:
-        plan = loop.run_until_complete(glitch(context, rule, task))
-    except model.TestFailure as e:
-        return False
-    else:
-        return True
+    loop = juju_model.loop
+    for action in plan['actions']:
+        logging.info('Performing action {}'.format(action))
+        loop.run_until_complete(perform_action(action, juju_model, rule))
 
 
 def make_juju_data(cls, specific_juju_data):
-    current_controller = specific_juju_data.current_controller()
-    models = specific_juju_data.models()
-    current_model = models[current_controller]['current-model']
+    current_controller, current_model, model_uuid = get_current(
+        specific_juju_data)
     env = cls(
         current_model, controller=Controller(current_controller),
         juju_home=specific_juju_data.path)
