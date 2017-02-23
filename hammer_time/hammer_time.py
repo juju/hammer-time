@@ -16,6 +16,7 @@ from juju.model import Model
 from jujupy import (
     get_client_class,
     ModelClient,
+    client_for_existing,
     )
 from jujupy.client import Controller
 import yaml
@@ -51,34 +52,29 @@ class SpecificJujuData(JujuData):
         return output.get('current-controller', '')
 
 
-def get_current(jujudata):
-    """Return current controller and model."""
-    controller_name = jujudata.current_controller()
-    if controller_name == '':
-        raise NoCurrentController(
-            'Juju has no current controller at {}'.format(jujudata.path))
-    models = jujudata.models()[controller_name]
-    model_name = models['current-model']
-    model_uuid = models['models'][model_name]['uuid']
-    return controller_name, model_name, model_uuid
-
-
-@contextmanager
-def connected_model(loop, jujudata):
-    controller_name, model_name, model_uuid = get_current(jujudata)
-    controller = jujudata.controllers()[controller_name]
-    try:
-        endpoint = controller['api-endpoints'][0]
-    except IndexError:
-        raise NoEndpoints('Juju controller has no endppoints set.')
-    cacert = controller.get('ca-cert')
+def get_auth_data(model_client):
+    jujudata = JujuData()
+    jujudata.path = model_client.env.juju_home
+    controller_name = model_client.env.controller.name
+    cacert = jujudata.controllers()[controller_name].get('ca-cert')
     accounts = jujudata.accounts()[controller_name]
     username = accounts['user']
     password = accounts.get('password')
+    return cacert, username, password
+
+
+@contextmanager
+def connected_model(loop, model_client):
+    host, port = model_client.get_controller_endpoint()
+    if ':' in host:
+        host = host.join('[]')
+    endpoint = '{}:{}'.format(host, port)
+    cacert, username, password = get_auth_data(model_client)
     macaroons = get_macaroons() if not password else None
     model = Model(loop)
     loop.run_until_complete(model.connect(
-        endpoint, model_uuid, username, password, cacert, macaroons,
+        endpoint, model_client.get_model_uuid(), username, password, cacert,
+        macaroons,
         ))
     try:
         yield model
@@ -120,10 +116,9 @@ def is_workable_plan(client, plan):
 
 
 def make_plan(plan_file, juju_data, action_count):
+    client = client_for_existing(None, juju_data)
     loop = asyncio.get_event_loop()
-    specific_juju_data = SpecificJujuData(juju_data)
-    client = make_model_client(specific_juju_data)
-    with connected_model(loop, specific_juju_data) as model:
+    with connected_model(loop, client) as model:
         while True:
             plan = loop.run_until_complete(
                 generate_plan(None, model, action_count))
@@ -146,33 +141,12 @@ def run_glitch(plan_file, juju_model):
         loop.run_until_complete(perform_action(action, juju_model, rule))
 
 
-def make_juju_data(cls, specific_juju_data):
-    current_controller, current_model, model_uuid = get_current(
-        specific_juju_data)
-    env = cls(
-        current_model, controller=Controller(current_controller),
-        juju_home=specific_juju_data.path)
-    return env
-
-
-def make_model_client(specific_juju_data):
-    full_path = None
-    if full_path is None:
-        full_path = ModelClient.get_full_path()
-    version = ModelClient.get_version(full_path)
-    client_class = get_client_class(str(version))
-    env = make_juju_data(client_class.config_class, specific_juju_data)
-    client = client_class(env, version, full_path)
-    return client
-
-
 def execute_plan(plan_file, juju_data):
-    specific_juju_data = SpecificJujuData(juju_data)
-    client = make_model_client(specific_juju_data)
+    client = client_for_existing(None, juju_data)
     client.wait_for_started()
 
     loop = asyncio.get_event_loop()
-    with connected_model(loop, specific_juju_data) as juju_model:
+    with connected_model(loop, client) as juju_model:
         run_glitch(plan_file, juju_model)
     loop.close()
     client.wait_for_started()
