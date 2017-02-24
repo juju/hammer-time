@@ -57,13 +57,18 @@ def parse_args():
     parser = ArgumentParser()
     subparsers = parser.add_subparsers(dest='cmd')
     subparsers.required = True
-    plan = subparsers.add_parser('random-plan')
+    plan = subparsers.add_parser('random-plan',
+        description='Generate a random plan.'
+        )
     plan.set_defaults(func=random_plan)
     plan.add_argument('plan_file', help='The file to write to.')
     plan.add_argument('--juju-data', help='Location of JUJU_DATA.')
-    plan.add_argument('--action-count', help='Number of actions in the plan',
-                      default=1, type=int)
-    execute = subparsers.add_parser('execute')
+    plan.add_argument(
+        '--action-count', help='Number of actions in the plan.  (default: 1)',
+        default=1, type=int)
+
+    execute = subparsers.add_parser(
+        'execute', description='Execute a plan.')
     execute.set_defaults(func=execute_plan)
     execute.add_argument('plan_file', help='The file containing the plan.')
     execute.add_argument('--juju-data', help='Location of JUJU_DATA.')
@@ -73,8 +78,8 @@ def parse_args():
 def is_workable_plan(client, plan):
     """Check whether the current plan is workable.
 
-    The current example of an unworkable plan is one where the last unit of an
-    application is removed, but more may be added.
+    Currently, this just check whether the plan wants to remove the last unit
+    of an application.  More checks may be added in the future.
     """
     for action in plan['actions']:
         if action['action'] == 'remove_unit':
@@ -92,7 +97,6 @@ def random_plan(plan_file, juju_data, action_count):
     """Implement 'random-plan' subcommand.
 
     This writes a randomly-generated plan file.
-
     :param plan_file: The filename for the plan.
     :param juju_data: The JUJU_DATA directory containing the model.
     :param action_count: The number of Glitch actions the plan should include.
@@ -117,8 +121,9 @@ def run_glitch(plan, client):
     :param plan: The parsed glitch plan.
     :param client: The jujupy.ModelClient to run the plan against.
     """
-    task = model.Task(command='glitch', args={'path': None})
-    rule = model.Rule(task)
+    # Rule is a mandatory, statically-typed argument to perform_action and its
+    # callees.
+    rule = model.Rule(model.Task(command='glitch', args={'path': None}))
     loop = asyncio.get_event_loop()
     with connected_model(loop, client) as juju_model:
         for action in plan['actions']:
