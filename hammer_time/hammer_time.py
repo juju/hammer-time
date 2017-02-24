@@ -14,11 +14,10 @@ from juju.model import Model
 from jujupy import (
     client_for_existing,
     )
-import yaml
-
 from matrix import model
 from matrix.tasks.glitch.plan import generate_plan
 from matrix.tasks.glitch.main import perform_action
+import yaml
 
 
 def get_auth_data(model_client):
