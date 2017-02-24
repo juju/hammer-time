@@ -5,51 +5,20 @@ import logging
 import os
 import subprocess
 import shlex
-import sys
 
 from juju.client.connection import (
-    Connection,
     get_macaroons,
     JujuData,
     )
 from juju.model import Model
 from jujupy import (
-    get_client_class,
-    ModelClient,
     client_for_existing,
     )
-from jujupy.client import Controller
 import yaml
 
-from matrix.bus import Bus
 from matrix import model
 from matrix.tasks.glitch.plan import generate_plan
 from matrix.tasks.glitch.main import perform_action
-
-
-class NoCurrentController(Exception):
-    """Raised when Juju has no current controller set."""
-
-
-class NoEndpoints(Exception):
-    """Raised when the controller endpoints are not yet set."""
-
-
-class SpecificJujuData(JujuData):
-    """A JujuData for a specific path."""
-
-    def __init__(self, juju_data_path):
-        super().__init__()
-        if juju_data_path is not None:
-            self.path = juju_data_path
-
-    def current_controller(self):
-        cmd = shlex.split('juju list-controllers --format yaml')
-        env = dict(os.environ)
-        env['JUJU_DATA'] = self.path
-        output = subprocess.check_output(cmd, env=env)
-        output = yaml.safe_load(output)
-        return output.get('current-controller', '')
 
 
 def get_auth_data(model_client):
@@ -112,7 +81,6 @@ def is_workable_plan(client, plan):
                     if len(units) < 2:
                         return False
     return True
-
 
 
 def make_plan(plan_file, juju_data, action_count):
