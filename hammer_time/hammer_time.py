@@ -163,21 +163,6 @@ def run_glitch(plan, client):
     loop.close()
 
 
-def load_boot_config(juju_data):
-    """Load data from bootstrap-config."""
-    filename = os.path.join(juju_data.juju_home, 'bootstrap-config.yaml')
-    with open(filename) as f:
-        all_bootstrap = yaml.load(f)
-    ctrl_config = all_bootstrap['controllers'][juju_data.controller.name]
-    config = ctrl_config['controller-config']
-    config.update(ctrl_config['model-config'])
-    # juju_data._config is expected to have a 1.x style of config, so mash up
-    # controller and model config.
-    juju_data._config = config
-    juju_data._cloud_name = ctrl_config['cloud']
-    juju_data.set_region(ctrl_config['region'])
-
-
 def execute_plan(plan_file, juju_data):
     """Implement the 'execute' subcommand.
 
@@ -187,10 +172,6 @@ def execute_plan(plan_file, juju_data):
     with open(plan_file) as f:
         plan = yaml.safe_load(f)
     client = client_for_existing(None, juju_data)
-    load_boot_config(client.env)
-    with open(os.path.join(client.env.juju_home,
-                           'bootstrap-config.yaml')) as f:
-        client.env.config = yaml.load(f)
     client._backend._full_path = client._backend._full_path.decode('utf-8')
     # Ensure the model is healthy before beginning.
     client.wait_for_started()
