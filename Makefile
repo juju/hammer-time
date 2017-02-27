@@ -10,4 +10,7 @@ bin/pip3:
 lint:
 	flake8 hammer_time
 
-.PHONY: install-deps
+test:
+	bin/nosetests hammer_time -v
+
+.PHONY: install-deps lint test

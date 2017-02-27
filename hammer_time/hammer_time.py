@@ -3,18 +3,19 @@ from argparse import ArgumentParser
 from contextlib import contextmanager
 import logging
 import os
-import subprocess
-import shlex
 
+from juju.application import Application
 from juju.client.connection import (
     get_macaroons,
     JujuData,
     )
+from jujupy.client import ConditionList
 from juju.model import Model
 from jujupy import (
     client_for_existing,
     )
 from matrix import model
+from matrix.tasks.glitch.actions import action
 from matrix.tasks.glitch.plan import generate_plan
 from matrix.tasks.glitch.main import perform_action
 import yaml
@@ -30,6 +31,33 @@ def get_auth_data(model_client):
     username = accounts['user']
     password = accounts.get('password')
     return cacert, username, password
+
+
+def cli_add_remove_many_machine(client):
+    """Add and removie many machines using the cli."""
+    old_status = client.get_status()
+    client.juju('add-machine', ('-n', '5'))
+    client.wait_for_started()
+    new_status = client.get_status()
+    conditions = []
+    for machine_id, data in new_status.iter_new_machines(old_status):
+        client.juju('remove-machine', (machine_id,))
+        conditions.append(client.make_remove_machine_condition(machine_id))
+    client.wait_for(ConditionList(conditions))
+
+
+def add_cli_actions(client):
+    """Add cli-based actions.
+
+    This works because @action registers the callable with the Actions
+    singleton.
+    """
+    @action
+    async def add_remove_many_machine(
+            rule: model.Rule, model: Model, application: Application):
+        # Note: application is supplied only to make generate_plan /
+        # perform_action happy.  It is ignored.
+        cli_add_remove_many_machine(client)
 
 
 @contextmanager
@@ -57,8 +85,8 @@ def parse_args():
     parser = ArgumentParser()
     subparsers = parser.add_subparsers(dest='cmd')
     subparsers.required = True
-    plan = subparsers.add_parser('random-plan',
-        description='Generate a random plan.'
+    plan = subparsers.add_parser(
+        'random-plan', description='Generate a random plan.'
         )
     plan.set_defaults(func=random_plan)
     plan.add_argument('plan_file', help='The file to write to.')
@@ -76,15 +104,15 @@ def parse_args():
 
 
 def is_workable_plan(client, plan):
-    """Check whether the current plan is workable.
+    """Check whether the supplied plan is workable for the current model.
 
-    Currently, this just check whether the plan wants to remove the last unit
+    Currently, this just checks whether the plan wants to remove the last unit
     of an application.  More checks may be added in the future.
     """
-    for action in plan['actions']:
-        if action['action'] == 'remove_unit':
+    for plan_action in plan['actions']:
+        if plan_action['action'] == 'remove_unit':
             status = client.get_status()
-            for selector in action['selectors']:
+            for selector in plan_action['selectors']:
                 if selector['selector'] == 'units':
                     applications = status.get_applications()
                     units = applications[selector['application']]['units']
@@ -102,6 +130,7 @@ def random_plan(plan_file, juju_data, action_count):
     :param action_count: The number of Glitch actions the plan should include.
     """
     client = client_for_existing(None, juju_data)
+    add_cli_actions(client)
     loop = asyncio.get_event_loop()
     with connected_model(loop, client) as model:
         while True:
@@ -123,13 +152,30 @@ def run_glitch(plan, client):
     """
     # Rule is a mandatory, statically-typed argument to perform_action and its
     # callees.
+    add_cli_actions(client)
     rule = model.Rule(model.Task(command='glitch', args={'path': None}))
     loop = asyncio.get_event_loop()
     with connected_model(loop, client) as juju_model:
-        for action in plan['actions']:
-            logging.info('Performing action {}'.format(action))
-            loop.run_until_complete(perform_action(action, juju_model, rule))
+        for plan_action in plan['actions']:
+            logging.info('Performing action {}'.format(plan_action))
+            loop.run_until_complete(
+                perform_action(plan_action, juju_model, rule))
     loop.close()
+
+
+def load_boot_config(juju_data):
+    """Load data from bootstrap-config."""
+    filename = os.path.join(juju_data.juju_home, 'bootstrap-config.yaml')
+    with open(filename) as f:
+        all_bootstrap = yaml.load(f)
+    ctrl_config = all_bootstrap['controllers'][juju_data.controller.name]
+    config = ctrl_config['controller-config']
+    config.update(ctrl_config['model-config'])
+    # juju_data._config is expected to have a 1.x style of config, so mash up
+    # controller and model config.
+    juju_data._config = config
+    juju_data._cloud_name = ctrl_config['cloud']
+    juju_data.set_region(ctrl_config['region'])
 
 
 def execute_plan(plan_file, juju_data):
@@ -141,6 +187,11 @@ def execute_plan(plan_file, juju_data):
     with open(plan_file) as f:
         plan = yaml.safe_load(f)
     client = client_for_existing(None, juju_data)
+    load_boot_config(client.env)
+    with open(os.path.join(client.env.juju_home,
+                           'bootstrap-config.yaml')) as f:
+        client.env.config = yaml.load(f)
+    client._backend._full_path = client._backend._full_path.decode('utf-8')
     # Ensure the model is healthy before beginning.
     client.wait_for_started()
     run_glitch(plan, client)

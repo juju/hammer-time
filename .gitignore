@@ -9,3 +9,5 @@ src/*
 *.egg-info/*
 plan.yaml
 __pycache__
+.cache
+man/*
