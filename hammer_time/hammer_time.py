@@ -2,7 +2,6 @@ import asyncio
 from argparse import ArgumentParser
 from contextlib import contextmanager
 import logging
-import os
 
 from juju.application import Application
 from juju.client.connection import (
@@ -19,6 +18,10 @@ from matrix.tasks.glitch.actions import action
 from matrix.tasks.glitch.plan import generate_plan
 from matrix.tasks.glitch.main import perform_action
 import yaml
+
+
+class ActionFailed(Exception):
+    """Raised when an action failed."""
 
 
 def get_auth_data(model_client):
@@ -155,12 +158,16 @@ def run_glitch(plan, client):
     add_cli_actions(client)
     rule = model.Rule(model.Task(command='glitch', args={'path': None}))
     loop = asyncio.get_event_loop()
-    with connected_model(loop, client) as juju_model:
-        for plan_action in plan['actions']:
-            logging.info('Performing action {}'.format(plan_action))
-            loop.run_until_complete(
-                perform_action(plan_action, juju_model, rule))
-    loop.close()
+    try:
+        with connected_model(loop, client) as juju_model:
+            for plan_action in plan['actions']:
+                logging.info('Performing action {}'.format(plan_action))
+                fname, failed = loop.run_until_complete(
+                    perform_action(plan_action, juju_model, rule))
+                if failed:
+                    raise ActionFailed()
+    finally:
+        loop.close()
 
 
 def execute_plan(plan_file, juju_data):
