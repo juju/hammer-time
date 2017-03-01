@@ -43,11 +43,11 @@ class TestCLIAddRemoveManyContainer(TestCase):
     def test_add_remove_many_container(self):
         client = fake_juju_client()
         client.bootstrap()
+        client.juju('add-machine', ())
         with patch.object(client._backend, 'juju',
                           wraps=client._backend.juju) as juju_mock:
-            cli_add_remove_many_container(client)
+            cli_add_remove_many_container(client, '0')
         self.assertEqual([
-            backend_call(client, 'add-machine', ('-n', '1')),
             backend_call(client, 'add-machine', ('lxd:0')),
             backend_call(client, 'add-machine', ('lxd:0')),
             backend_call(client, 'add-machine', ('lxd:0')),
@@ -64,5 +64,4 @@ class TestCLIAddRemoveManyContainer(TestCase):
             backend_call(client, 'remove-machine', ('0/lxd/5',)),
             backend_call(client, 'remove-machine', ('0/lxd/6',)),
             backend_call(client, 'remove-machine', ('0/lxd/7',)),
-            backend_call(client, 'remove-machine', ('0',)),
             ], juju_mock.mock_calls)

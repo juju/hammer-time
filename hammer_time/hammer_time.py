@@ -10,6 +10,7 @@ from juju.client.connection import (
     JujuData,
     )
 from jujupy.client import ConditionList
+from juju.machine import Machine
 from juju.model import Model
 from jujupy import (
     client_for_existing,
@@ -50,14 +51,8 @@ def cli_add_remove_many_machine(client):
     remove_and_wait(client, new_status.iter_new_machines(old_status))
 
 
-def cli_add_remove_many_container(client):
+def cli_add_remove_many_container(client, host_id):
     """Add and remove many containers using the cli."""
-    old_status = client.get_status()
-    client.juju('add-machine', ('-n', '1'))
-    client.wait_for_started()
-    new_status = client.get_status()
-    conditions = []
-    (host_id,) = [m for m, d in new_status.iter_new_machines(old_status)]
     old_status = client.get_status()
     for count in range(8):
         client.juju('add-machine', ('lxd:{}'.format(host_id)))
@@ -66,8 +61,6 @@ def cli_add_remove_many_container(client):
     new_cont = list(new_status.iter_new_machines(old_status,
                                                  containers=True))
     remove_and_wait(client, sorted(new_cont))
-    client.wait_for_started()
-    remove_and_wait(client, [(host_id, None)])
 
 
 def add_cli_actions(client):
@@ -85,10 +78,8 @@ def add_cli_actions(client):
 
     @action
     async def add_remove_many_container(
-            rule: model.Rule, model: Model, application: Application):
-        # Note: application is supplied only to make generate_plan /
-        # perform_action happy.  It is ignored.
-        cli_add_remove_many_container(client)
+            rule: model.Rule, model: Model, machine: Machine):
+        cli_add_remove_many_container(client, machine.id)
 
 
 @contextmanager
