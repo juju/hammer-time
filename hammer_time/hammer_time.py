@@ -33,17 +33,41 @@ def get_auth_data(model_client):
     return cacert, username, password
 
 
+def remove_and_wait(client, machines):
+    conditions = []
+    for machine_id, data in machines:
+        client.juju('remove-machine', (machine_id,))
+        conditions.append(client.make_remove_machine_condition(machine_id))
+    client.wait_for(ConditionList(conditions))
+
+
 def cli_add_remove_many_machine(client):
     """Add and removie many machines using the cli."""
     old_status = client.get_status()
     client.juju('add-machine', ('-n', '5'))
     client.wait_for_started()
     new_status = client.get_status()
+    remove_and_wait(client, new_status.iter_new_machines(old_status))
+
+
+def cli_add_remove_many_container(client):
+    """Add and remove many containers using the cli."""
+    old_status = client.get_status()
+    client.juju('add-machine', ('-n', '1'))
+    client.wait_for_started()
+    new_status = client.get_status()
     conditions = []
-    for machine_id, data in new_status.iter_new_machines(old_status):
-        client.juju('remove-machine', (machine_id,))
-        conditions.append(client.make_remove_machine_condition(machine_id))
-    client.wait_for(ConditionList(conditions))
+    (host_id,) = [m for m, d in new_status.iter_new_machines(old_status)]
+    old_status = client.get_status()
+    for count in range(8):
+        client.juju('add-machine', ('lxd:{}'.format(host_id)))
+    client.wait_for_started()
+    new_status = client.get_status()
+    new_cont = list(new_status.iter_new_machines(old_status,
+                                                 containers=True))
+    remove_and_wait(client, sorted(new_cont))
+    client.wait_for_started()
+    remove_and_wait(client, [(host_id, None)])
 
 
 def add_cli_actions(client):
@@ -58,6 +82,13 @@ def add_cli_actions(client):
         # Note: application is supplied only to make generate_plan /
         # perform_action happy.  It is ignored.
         cli_add_remove_many_machine(client)
+
+    @action
+    async def add_remove_many_container(
+            rule: model.Rule, model: Model, application: Application):
+        # Note: application is supplied only to make generate_plan /
+        # perform_action happy.  It is ignored.
+        cli_add_remove_many_container(client)
 
 
 @contextmanager
@@ -150,9 +181,9 @@ def run_glitch(plan, client):
     :param plan: The parsed glitch plan.
     :param client: The jujupy.ModelClient to run the plan against.
     """
+    add_cli_actions(client)
     # Rule is a mandatory, statically-typed argument to perform_action and its
     # callees.
-    add_cli_actions(client)
     rule = model.Rule(model.Task(command='glitch', args={'path': None}))
     loop = asyncio.get_event_loop()
     with connected_model(loop, client) as juju_model:
