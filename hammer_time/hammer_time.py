@@ -40,8 +40,7 @@ def get_auth_data(model_client):
 def remove_and_wait(client, machines):
     conditions = []
     for machine_id, data in machines:
-        client.juju('remove-machine', (machine_id,))
-        conditions.append(client.make_remove_machine_condition(machine_id))
+        conditions.append(client.remove_machine(machine_id))
     client.wait_for(ConditionList(conditions))
 
 
@@ -201,7 +200,6 @@ def execute_plan(plan_file, juju_data):
     with open(plan_file) as f:
         plan = yaml.safe_load(f)
     client = client_for_existing(None, juju_data)
-    client._backend._full_path = client._backend._full_path.decode('utf-8')
     # Ensure the model is healthy before beginning.
     client.wait_for_started()
     run_glitch(plan, client)
