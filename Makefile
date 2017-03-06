@@ -1,7 +1,8 @@
 develop: .develop-canary
 
-.develop-canary: .python-canary
+.develop-canary: .python-canary setup.py
 	bin/python setup.py develop
+	bin/pip install nosetests
 	touch .develop-canary
 
 .python-canary: requirements.txt bin/pip3

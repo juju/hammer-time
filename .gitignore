@@ -6,8 +6,11 @@ share/*
 src/*
 *.swp
 .python-canary
+.develop-canary
 *.egg-info/*
 plan.yaml
 __pycache__
 .cache
 man/*
+lib64
+pyvenv.cfg
