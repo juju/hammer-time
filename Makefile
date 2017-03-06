@@ -2,7 +2,7 @@ develop: .develop-canary
 
 .develop-canary: .python-canary setup.py
 	bin/python setup.py develop
-	bin/pip install nosetests
+	bin/pip install nose
 	touch .develop-canary
 
 .python-canary: requirements.txt bin/pip3
