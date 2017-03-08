@@ -4,6 +4,7 @@ from random import (
     shuffle,
     )
 import logging
+import time
 
 from jujupy.client import ConditionList
 from jujupy import (
@@ -33,12 +34,16 @@ class AddRemoveManyMachineAction:
         remove_and_wait(client, new_status.iter_new_machines(old_status))
 
 
+def choose_machine(client):
+    status = client.get_status()
+    machines = list(m for m, d in status.iter_machines(containers=False))
+    return choice(machines)
+
+
 class AddRemoveManyContainerAction:
 
     def generate_parameters(client):
-        status = client.get_status()
-        machines = list(m for m, d in status.iter_machines(containers=False))
-        return {'host_id': choice(machines)}
+        return {'host_id': choose_machine(client)}
 
     def perform(client, host_id):
         """Add and remove many containers using the cli."""
@@ -50,6 +55,19 @@ class AddRemoveManyContainerAction:
         new_cont = list(new_status.iter_new_machines(old_status,
                                                      containers=True))
         remove_and_wait(client, sorted(new_cont))
+
+
+class KillMongoDAction:
+    """Action to kill mongod."""
+
+    def generate_parameters(client):
+        return {'machine_id': choose_machine(client.get_controller_client())}
+
+    def perform(client, machine_id):
+        ctrl_client = client.get_controller_client()
+        ctrl_client.juju('ssh', (machine_id, 'sudo', 'pkill', 'mongod'))
+        # The impact of killing mongod seems to be delayed.
+        time.sleep(5)
 
 
 def parse_args():
@@ -116,6 +134,7 @@ def default_actions():
     return Actions({
         'add_remove_many_machines': AddRemoveManyMachineAction,
         'add_remove_many_container': AddRemoveManyContainerAction,
+        'kill_mongod': KillMongoDAction,
         })
 
 
