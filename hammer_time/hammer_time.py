@@ -9,6 +9,7 @@ from juju.client.connection import (
     JujuData,
     )
 from jujupy.client import ConditionList
+from juju.machine import Machine
 from juju.model import Model
 from jujupy import (
     client_for_existing,
@@ -36,17 +37,32 @@ def get_auth_data(model_client):
     return cacert, username, password
 
 
+def remove_and_wait(client, machines):
+    conditions = []
+    for machine_id, data in machines:
+        conditions.append(client.remove_machine(machine_id))
+    client.wait_for(ConditionList(conditions))
+
+
 def cli_add_remove_many_machine(client):
     """Add and removie many machines using the cli."""
     old_status = client.get_status()
     client.juju('add-machine', ('-n', '5'))
     client.wait_for_started()
     new_status = client.get_status()
-    conditions = []
-    for machine_id, data in new_status.iter_new_machines(old_status):
-        client.juju('remove-machine', (machine_id,))
-        conditions.append(client.make_remove_machine_condition(machine_id))
-    client.wait_for(ConditionList(conditions))
+    remove_and_wait(client, new_status.iter_new_machines(old_status))
+
+
+def cli_add_remove_many_container(client, host_id):
+    """Add and remove many containers using the cli."""
+    old_status = client.get_status()
+    for count in range(8):
+        client.juju('add-machine', ('lxd:{}'.format(host_id)))
+    client.wait_for_started()
+    new_status = client.get_status()
+    new_cont = list(new_status.iter_new_machines(old_status,
+                                                 containers=True))
+    remove_and_wait(client, sorted(new_cont))
 
 
 def add_cli_actions(client):
@@ -61,6 +77,11 @@ def add_cli_actions(client):
         # Note: application is supplied only to make generate_plan /
         # perform_action happy.  It is ignored.
         cli_add_remove_many_machine(client)
+
+    @action
+    async def add_remove_many_container(
+            rule: model.Rule, model: Model, machine: Machine):
+        cli_add_remove_many_container(client, machine.id)
 
 
 @contextmanager
@@ -153,9 +174,9 @@ def run_glitch(plan, client):
     :param plan: The parsed glitch plan.
     :param client: The jujupy.ModelClient to run the plan against.
     """
+    add_cli_actions(client)
     # Rule is a mandatory, statically-typed argument to perform_action and its
     # callees.
-    add_cli_actions(client)
     rule = model.Rule(model.Task(command='glitch', args={'path': None}))
     loop = asyncio.get_event_loop()
     try:
@@ -179,7 +200,6 @@ def execute_plan(plan_file, juju_data):
     with open(plan_file) as f:
         plan = yaml.safe_load(f)
     client = client_for_existing(None, juju_data)
-    client._backend._full_path = client._backend._full_path.decode('utf-8')
     # Ensure the model is healthy before beginning.
     client.wait_for_started()
     run_glitch(plan, client)
