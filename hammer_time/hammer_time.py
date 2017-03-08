@@ -81,24 +81,6 @@ def parse_args():
     return parser.parse_args()
 
 
-def is_workable_plan(client, plan):
-    """Check whether the supplied plan is workable for the current model.
-
-    Currently, this just checks whether the plan wants to remove the last unit
-    of an application.  More checks may be added in the future.
-    """
-    for plan_action in plan['actions']:
-        if plan_action['action'] == 'remove_unit':
-            status = client.get_status()
-            for selector in plan_action['selectors']:
-                if selector['selector'] == 'units':
-                    applications = status.get_applications()
-                    units = applications[selector['application']]['units']
-                    if len(units) < 2:
-                        return False
-    return True
-
-
 class InvalidActionError(Exception):
     """Raised when the action is not valid for the client's model."""
 
@@ -161,7 +143,7 @@ def random_plan(plan_file, juju_data, action_count):
         yaml.dump(plan, f)
 
 
-def run_glitch(plan, client):
+def run_plan(plan, client):
     """Run a plan against a ModelClient.
 
     :param plan: The plan, as a list of dicts.
@@ -183,7 +165,7 @@ def execute_plan(plan_file, juju_data):
     client = client_for_existing(None, juju_data)
     # Ensure the model is healthy before beginning.
     client.wait_for_started()
-    run_glitch(plan, client)
+    run_plan(plan, client)
     # Ensure the model is healthy after running the plan.
     client.wait_for_started()
 

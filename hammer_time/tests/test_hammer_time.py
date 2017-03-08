@@ -17,7 +17,7 @@ from hammer_time.hammer_time import (
     InvalidActionError,
     NoValidActionsError,
     random_plan,
-    run_glitch,
+    run_plan,
     )
 
 
@@ -190,14 +190,14 @@ class TestRandomPlan(TestCase):
             {'one': {'foo': 'bar'}}, {'one': {'foo': 'bar'}}])
 
 
-class TestRunGlitch(TestCase):
+class TestRunPlan(TestCase):
 
-    def test_run_glitch(self):
+    def test_run_plan(self):
         client = fake_juju_client
         step = Step(self, client)
         actions = Actions({'step': step})
         plan = [{'step': {'bar': 'baz'}}]
         with patch('hammer_time.hammer_time.default_actions',
                    autospec=True, return_value=actions):
-            run_glitch(plan, client)
+            run_plan(plan, client)
         self.assertIs(True, step.performed)
