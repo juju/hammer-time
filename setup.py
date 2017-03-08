@@ -17,7 +17,8 @@ SETUP = {
             'h-time = hammer_time.hammer_time:main',
         ]
     },
-    'install_requires': reqs,
+    # Note: requirements.txt has the correct values to install these packages.
+    'install_requires': ['matrix', 'jujupy'],
 }
 
 
