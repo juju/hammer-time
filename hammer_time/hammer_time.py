@@ -1,4 +1,3 @@
-import asyncio
 from argparse import ArgumentParser
 from contextlib import contextmanager
 from random import shuffle
@@ -17,7 +16,6 @@ from jujupy import (
     )
 from matrix import model
 from matrix.tasks.glitch.actions import action
-from matrix.tasks.glitch.main import perform_action
 import yaml
 
 
@@ -167,6 +165,7 @@ class Actions:
         return action_items
 
     def generate_step(self, client):
+        """Generate an arbitrary action with parameters."""
         for name, cur_action in self.list_arbitrary_actions():
             try:
                 return name, cur_action, cur_action.generate_parameters(client)
@@ -174,6 +173,11 @@ class Actions:
                 pass
         else:
             raise NoValidActionsError('No valid actions for model.')
+
+    def perform_step(self, client, step):
+        """Perform an action formatted as a step dictionary."""
+        ((name, parameters),) = step.items()
+        self._actions[name].perform(client, **parameters)
 
 
 def default_actions():
@@ -199,26 +203,14 @@ def random_plan(plan_file, juju_data, action_count):
 
 
 def run_glitch(plan, client):
-    """Run a Gitch plan against a Juju client.
+    """Run a plan against a ModelClient.
 
-    :param plan: The parsed glitch plan.
-    :param client: The jujupy.ModelClient to run the plan against.
+    :param plan: The plan, as a list of dicts.
+    :param client: The jujupy.ModelClient to run the plan agains.
     """
-    add_cli_actions(client)
-    # Rule is a mandatory, statically-typed argument to perform_action and its
-    # callees.
-    rule = model.Rule(model.Task(command='glitch', args={'path': None}))
-    loop = asyncio.get_event_loop()
-    try:
-        with connected_model(loop, client) as juju_model:
-            for plan_action in plan['actions']:
-                logging.info('Performing action {}'.format(plan_action))
-                fname, failed = loop.run_until_complete(
-                    perform_action(plan_action, juju_model, rule))
-                if failed:
-                    raise ActionFailed()
-    finally:
-        loop.close()
+    actions = default_actions()
+    for step in plan:
+        actions.perform_step(client, step)
 
 
 def execute_plan(plan_file, juju_data):

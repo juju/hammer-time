@@ -1,4 +1,3 @@
-import asyncio
 from collections import OrderedDict
 from contextlib import contextmanager
 import os
@@ -14,7 +13,6 @@ import yaml
 
 from hammer_time.hammer_time import (
     Actions,
-    ActionFailed,
     cli_add_remove_many_container,
     cli_add_remove_many_machine,
     InvalidActionError,
@@ -125,6 +123,19 @@ class FooBarAction:
         return {'foo': 'bar'}
 
 
+class Step():
+
+    def __init__(self, test_case, client):
+        self.performed = False
+        self.test_case = test_case
+        self.client = client
+
+    def perform(self, client, bar):
+        self.test_case.assertEqual(bar, 'baz')
+        self.test_case.assertIs(client, self.client)
+        self.performed = True
+
+
 class TestActions(TestCase):
 
     def test_list_arbitrary_actions(self):
@@ -177,6 +188,15 @@ class TestActions(TestCase):
                 NoValidActionsError, 'No valid actions for model.'):
             actions.generate_step(None)
 
+    def test_perform_step(self):
+
+        cur_client = object()
+
+        step = Step(self, cur_client)
+        actions = Actions({'step': step})
+        actions.perform_step(cur_client, {'step': {'bar': 'baz'}})
+        self.assertIs(True, step.performed)
+
 
 class TestRandomPlan(TestCase):
 
@@ -200,28 +220,12 @@ class TestRandomPlan(TestCase):
 
 class TestRunGlitch(TestCase):
 
-    def setUp(self):
-        asyncio.set_event_loop(asyncio.new_event_loop())
-
     def test_run_glitch(self):
-        plan = {
-            'actions': [{
-                'action': 'pass', 'selectors': [{'selector': 'dummy'}]
-                }]
-            }
-        with patch('hammer_time.hammer_time.connected_model'):
-            with plan_fakes():
-                run_glitch(plan, None)
-        self.assertIs(True, asyncio.get_event_loop().is_closed())
-
-    def test_run_glitch_raises_action_failed(self):
-        plan = {
-            'actions': [{
-                'action': 'fail', 'selectors': [{'selector': 'dummy'}]
-                }]
-            }
-        with patch('hammer_time.hammer_time.connected_model'):
-            with plan_fakes():
-                with self.assertRaises(ActionFailed):
-                    run_glitch(plan, None)
-        self.assertIs(True, asyncio.get_event_loop().is_closed())
+        client = fake_juju_client
+        step = Step(self, client)
+        actions = Actions({'step': step})
+        plan = [{'step': {'bar': 'baz'}}]
+        with patch('hammer_time.hammer_time.default_actions',
+                   autospec=True, return_value=actions):
+            run_glitch(plan, client)
+        self.assertIs(True, step.performed)
