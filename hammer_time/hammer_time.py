@@ -1,6 +1,9 @@
 from argparse import ArgumentParser
 from contextlib import contextmanager
-from random import shuffle
+from random import (
+    choice,
+    shuffle,
+    )
 import logging
 
 from juju.application import Application
@@ -51,6 +54,14 @@ def cli_add_remove_many_machine(client):
     remove_and_wait(client, new_status.iter_new_machines(old_status))
 
 
+class AddRemoveManyMachineAction:
+
+    def generate_parameters(client):
+        return {}
+
+    perform = cli_add_remove_many_machine
+
+
 def cli_add_remove_many_container(client, host_id):
     """Add and remove many containers using the cli."""
     old_status = client.get_status()
@@ -61,6 +72,16 @@ def cli_add_remove_many_container(client, host_id):
     new_cont = list(new_status.iter_new_machines(old_status,
                                                  containers=True))
     remove_and_wait(client, sorted(new_cont))
+
+
+class AddRemoveManyContainerAction:
+
+    def generate_parameters(client):
+        status = client.get_status()
+        machines = list(m for m, d in status.iter_machines(containers=False))
+        return {'host_id': choice(machines)}
+
+    perform = cli_add_remove_many_container
 
 
 def add_cli_actions(client):
@@ -181,7 +202,10 @@ class Actions:
 
 
 def default_actions():
-    return Actions()
+    return Actions({
+        'add_remove_many_machines': AddRemoveManyMachineAction,
+        'add_remove_many_container': AddRemoveManyContainerAction,
+        })
 
 
 def random_plan(plan_file, juju_data, action_count):
