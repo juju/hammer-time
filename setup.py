@@ -18,7 +18,7 @@ SETUP = {
         ]
     },
     # Note: requirements.txt has the correct values to install these packages.
-    'install_requires': ['matrix', 'jujupy'],
+    'install_requires': ['jujupy'],
 }
 
 

@@ -1,41 +1,15 @@
 from argparse import ArgumentParser
-from contextlib import contextmanager
 from random import (
     choice,
     shuffle,
     )
 import logging
 
-from juju.application import Application
-from juju.client.connection import (
-    get_macaroons,
-    JujuData,
-    )
 from jujupy.client import ConditionList
-from juju.machine import Machine
-from juju.model import Model
 from jujupy import (
     client_for_existing,
     )
-from matrix import model
-from matrix.tasks.glitch.actions import action
 import yaml
-
-
-class ActionFailed(Exception):
-    """Raised when an action failed."""
-
-
-def get_auth_data(model_client):
-    """Get authentication data from a jujupy.ModelClient."""
-    jujudata = JujuData()
-    jujudata.path = model_client.env.juju_home
-    controller_name = model_client.env.controller.name
-    cacert = jujudata.controllers()[controller_name].get('ca-cert')
-    accounts = jujudata.accounts()[controller_name]
-    username = accounts['user']
-    password = accounts.get('password')
-    return cacert, username, password
 
 
 def remove_and_wait(client, machines):
@@ -82,45 +56,6 @@ class AddRemoveManyContainerAction:
         return {'host_id': choice(machines)}
 
     perform = cli_add_remove_many_container
-
-
-def add_cli_actions(client):
-    """Add cli-based actions.
-
-    This works because @action registers the callable with the Actions
-    singleton.
-    """
-    @action
-    async def add_remove_many_machine(
-            rule: model.Rule, model: Model, application: Application):
-        # Note: application is supplied only to make generate_plan /
-        # perform_action happy.  It is ignored.
-        cli_add_remove_many_machine(client)
-
-    @action
-    async def add_remove_many_container(
-            rule: model.Rule, model: Model, machine: Machine):
-        cli_add_remove_many_container(client, machine.id)
-
-
-@contextmanager
-def connected_model(loop, model_client):
-    """Use a jujupy.ModelClient to get a libjuju.Model."""
-    host, port = model_client.get_controller_endpoint()
-    if ':' in host:
-        host = host.join('[]')
-    endpoint = '{}:{}'.format(host, port)
-    cacert, username, password = get_auth_data(model_client)
-    macaroons = get_macaroons() if not password else None
-    model = Model(loop)
-    loop.run_until_complete(model.connect(
-        endpoint, model_client.get_model_uuid(), username, password, cacert,
-        macaroons,
-        ))
-    try:
-        yield model
-    finally:
-        loop.run_until_complete(model.disconnect())
 
 
 def parse_args():

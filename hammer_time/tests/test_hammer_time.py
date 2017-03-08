@@ -1,5 +1,4 @@
 from collections import OrderedDict
-from contextlib import contextmanager
 import os
 from unittest import TestCase
 from unittest.mock import (
@@ -75,33 +74,6 @@ class TestCLIAddRemoveManyContainer(TestCase):
             backend_call(client, 'remove-machine', ('0/lxd/6',)),
             backend_call(client, 'remove-machine', ('0/lxd/7',)),
             ], juju_mock.mock_calls)
-
-
-@contextmanager
-def plan_fakes():
-
-    async def fail(a, b, c):
-        raise Exception()
-
-    async def do_pass(a, b, c):
-        pass
-
-    actions = {
-        'fail': {'func': fail},
-        'pass': {'func': do_pass},
-        }
-
-    async def dummy(a, b):
-
-        return [None]
-
-    selectors = {
-        'dummy': dummy,
-    }
-    from matrix.tasks.glitch import main
-    with patch.object(main, 'Actions', actions):
-        with patch.object(main, 'Selectors', selectors):
-            yield
 
 
 class FixedOrderActions(Actions):
