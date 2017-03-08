@@ -19,33 +19,18 @@ def remove_and_wait(client, machines):
     client.wait_for(ConditionList(conditions))
 
 
-def cli_add_remove_many_machine(client):
-    """Add and removie many machines using the cli."""
-    old_status = client.get_status()
-    client.juju('add-machine', ('-n', '5'))
-    client.wait_for_started()
-    new_status = client.get_status()
-    remove_and_wait(client, new_status.iter_new_machines(old_status))
-
-
 class AddRemoveManyMachineAction:
 
     def generate_parameters(client):
         return {}
 
-    perform = cli_add_remove_many_machine
-
-
-def cli_add_remove_many_container(client, host_id):
-    """Add and remove many containers using the cli."""
-    old_status = client.get_status()
-    for count in range(8):
-        client.juju('add-machine', ('lxd:{}'.format(host_id)))
-    client.wait_for_started()
-    new_status = client.get_status()
-    new_cont = list(new_status.iter_new_machines(old_status,
-                                                 containers=True))
-    remove_and_wait(client, sorted(new_cont))
+    def perform(client):
+        """Add and removie many machines using the cli."""
+        old_status = client.get_status()
+        client.juju('add-machine', ('-n', '5'))
+        client.wait_for_started()
+        new_status = client.get_status()
+        remove_and_wait(client, new_status.iter_new_machines(old_status))
 
 
 class AddRemoveManyContainerAction:
@@ -55,7 +40,16 @@ class AddRemoveManyContainerAction:
         machines = list(m for m, d in status.iter_machines(containers=False))
         return {'host_id': choice(machines)}
 
-    perform = cli_add_remove_many_container
+    def perform(client, host_id):
+        """Add and remove many containers using the cli."""
+        old_status = client.get_status()
+        for count in range(8):
+            client.juju('add-machine', ('lxd:{}'.format(host_id)))
+        client.wait_for_started()
+        new_status = client.get_status()
+        new_cont = list(new_status.iter_new_machines(old_status,
+                                                     containers=True))
+        remove_and_wait(client, sorted(new_cont))
 
 
 def parse_args():

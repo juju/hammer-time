@@ -12,8 +12,8 @@ import yaml
 
 from hammer_time.hammer_time import (
     Actions,
-    cli_add_remove_many_container,
-    cli_add_remove_many_machine,
+    AddRemoveManyContainerAction,
+    AddRemoveManyMachineAction,
     InvalidActionError,
     NoValidActionsError,
     random_plan,
@@ -29,14 +29,14 @@ def backend_call(client, cmd, args, model=None, check=True, timeout=None,
                 timeout, extra_env, suppress_err=False)
 
 
-class TestCLIAddRemoveManyMachine(TestCase):
+class TestAddRemoveManyMachineAction(TestCase):
 
     def test_add_remove_many_machine(self):
         client = fake_juju_client()
         client.bootstrap()
         with patch.object(client._backend, 'juju',
                           wraps=client._backend.juju) as juju_mock:
-            cli_add_remove_many_machine(client)
+            AddRemoveManyMachineAction.perform(client)
         self.assertEqual([
             backend_call(client, 'add-machine', ('-n', '5')),
             backend_call(client, 'remove-machine', ('0',)),
@@ -47,7 +47,7 @@ class TestCLIAddRemoveManyMachine(TestCase):
             ], juju_mock.mock_calls)
 
 
-class TestCLIAddRemoveManyContainer(TestCase):
+class TestAddRemoveManyContainerAction(TestCase):
 
     def test_add_remove_many_container(self):
         client = fake_juju_client()
@@ -55,7 +55,7 @@ class TestCLIAddRemoveManyContainer(TestCase):
         client.juju('add-machine', ())
         with patch.object(client._backend, 'juju',
                           wraps=client._backend.juju) as juju_mock:
-            cli_add_remove_many_container(client, '0')
+            AddRemoveManyContainerAction.perform(client, '0')
         self.assertEqual([
             backend_call(client, 'add-machine', ('lxd:0')),
             backend_call(client, 'add-machine', ('lxd:0')),
