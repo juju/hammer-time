@@ -1,6 +1,7 @@
 import asyncio
 from argparse import ArgumentParser
 from contextlib import contextmanager
+from random import shuffle
 import logging
 
 from juju.application import Application
@@ -16,7 +17,6 @@ from jujupy import (
     )
 from matrix import model
 from matrix.tasks.glitch.actions import action
-from matrix.tasks.glitch.plan import generate_plan
 from matrix.tasks.glitch.main import perform_action
 import yaml
 
@@ -145,27 +145,57 @@ def is_workable_plan(client, plan):
     return True
 
 
+class InvalidActionError(Exception):
+    """Raised when the action is not valid for the client's model."""
+
+
+class NoValidActionsError(Exception):
+    """Raised when there are no valid actions for the client's model."""
+
+
+class Actions:
+
+    def __init__(self, initial_actions=None):
+        if initial_actions is None:
+            initial_actions = {}
+        self._actions = initial_actions
+
+    def list_arbitrary_actions(self):
+        """Iterate through all known actions in an arbitrary order."""
+        action_items = list(self._actions.items())
+        shuffle(action_items)
+        return action_items
+
+    def generate_step(self, client):
+        for name, cur_action in self.list_arbitrary_actions():
+            try:
+                return name, cur_action, cur_action.generate_parameters(client)
+            except InvalidActionError:
+                pass
+        else:
+            raise NoValidActionsError('No valid actions for model.')
+
+
+def default_actions():
+    return Actions()
+
+
 def random_plan(plan_file, juju_data, action_count):
     """Implement 'random-plan' subcommand.
 
     This writes a randomly-generated plan file.
     :param plan_file: The filename for the plan.
     :param juju_data: The JUJU_DATA directory containing the model.
-    :param action_count: The number of Glitch actions the plan should include.
+    :param action_count: The number of actions the plan should include.
     """
     client = client_for_existing(None, juju_data)
-    add_cli_actions(client)
-    loop = asyncio.get_event_loop()
-    with connected_model(loop, client) as model:
-        while True:
-            plan = loop.run_until_complete(
-                generate_plan(None, model, action_count))
-            if is_workable_plan(client, plan):
-                break
-            logging.info('Generated unworkable plan.  Trying again.')
-    loop.close()
+    plan = []
+    actions = default_actions()
+    for step in range(action_count):
+        name, action, parameters = actions.generate_step(client)
+        plan.append({name: parameters})
     with open(plan_file, 'w') as f:
-        yaml.safe_dump(plan, f)
+        yaml.dump(plan, f)
 
 
 def run_glitch(plan, client):
