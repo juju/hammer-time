@@ -19,6 +19,7 @@ from hammer_time.hammer_time import (
     KillMongoDAction,
     NoValidActionsError,
     random_plan,
+    RebootMachineAction,
     run_plan,
     )
 
@@ -44,6 +45,13 @@ class TestChooseMachine(TestCase):
                 break
         else:
             raise AssertionError('Did not choose each machine.')
+
+    def test_no_machines(self):
+        chosen = set()
+        client = fake_juju_client()
+        client.bootstrap()
+        with self.assertRaises(InvalidActionError):
+            choose_machine(client)
 
 
 class TestAddRemoveManyMachineAction(TestCase):
@@ -118,6 +126,31 @@ class TestKillMongoDAction(TestCase):
                     KillMongoDAction.perform(client, '0')
         self.assertEqual([
             backend_call(ctrl_client, 'ssh', ('0', 'sudo', 'pkill', 'mongod')),
+            ], juju_mock.mock_calls)
+
+
+class TestRebootMachineAction(TestCase):
+
+    def test_generate_parameters(self):
+        client = fake_juju_client()
+        client.bootstrap()
+        with self.assertRaises(InvalidActionError):
+            parameters = RebootMachineAction.generate_parameters(client)
+
+        client.juju('add-machine', ('-n', '2'))
+        client.remove_machine('0')
+        parameters = RebootMachineAction.generate_parameters(client)
+        self.assertEqual(parameters, {'machine_id': '1'})
+
+    def test_perform(self):
+        client = fake_juju_client()
+        client.bootstrap()
+        client.juju('add-machine', ())
+        with patch.object(client._backend, 'juju',
+                          wraps=client._backend.juju) as juju_mock:
+            RebootMachineAction.perform(client, '0')
+        self.assertEqual([
+            backend_call(client, 'ssh', ('0', 'sudo', 'reboot')),
             ], juju_mock.mock_calls)
 
 

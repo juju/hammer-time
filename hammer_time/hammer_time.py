@@ -37,7 +37,20 @@ class AddRemoveManyMachineAction:
 def choose_machine(client):
     status = client.get_status()
     machines = list(m for m, d in status.iter_machines(containers=False))
+    if len(machines) == 0:
+        raise InvalidActionError('No machines to choose from.')
     return choice(machines)
+
+
+class RebootMachineAction:
+
+    def generate_parameters(client):
+        return {'machine_id': choose_machine(client)}
+
+    def perform(client, machine_id):
+        """Add and remove many containers using the cli."""
+        old_status = client.get_status()
+        client.juju('ssh', (machine_id, 'sudo', 'reboot'))
 
 
 class AddRemoveManyContainerAction:
