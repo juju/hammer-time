@@ -151,10 +151,19 @@ class TestRebootMachineAction(TestCase):
         parameters = RebootMachineAction.generate_parameters(client)
         with patch.object(client._backend, 'juju',
                           wraps=client._backend.juju) as juju_mock:
-            RebootMachineAction.perform(client, **parameters)
+            with patch.object(client._backend, 'get_juju_output',
+                              autospec=True,
+                              side_effect=['earlier', 'now']) as jo_mock:
+                RebootMachineAction.perform(client, **parameters)
         self.assertEqual([
             backend_call(client, 'ssh', ('0', 'sudo', 'reboot'), check=False),
             ], juju_mock.mock_calls)
+        expected_call = call(
+            'ssh', ('0', 'uptime', '-s'),
+            client.used_feature_flags, client.env.juju_home,
+            client._cmd_model(True, False),
+            user_name='admin')
+        self.assertEqual([expected_call, expected_call], jo_mock.mock_calls)
 
 
 class FixedOrderActions(Actions):
