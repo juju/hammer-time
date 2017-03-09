@@ -4,11 +4,13 @@ from random import (
     shuffle,
     )
 import logging
+import subprocess
 
 from jujupy.client import ConditionList
 from jujupy import (
     client_for_existing,
     )
+from jujupy.utility import until_timeout
 import yaml
 
 
@@ -33,12 +35,52 @@ class AddRemoveManyMachineAction:
         remove_and_wait(client, new_status.iter_new_machines(old_status))
 
 
-class AddRemoveManyContainerAction:
+def choose_machine(client):
+    """Choose a machine from the client's model at random.
+
+    :param client: The ModelClient to get machines for.
+    :return: a machine-id.
+    :raises: InvalidActionError if there are no machines to choose from.
+    """
+    status = client.get_status()
+    machines = list(m for m, d in status.iter_machines(containers=False))
+    if len(machines) == 0:
+        raise InvalidActionError('No machines to choose from.')
+    return choice(machines)
+
+
+class RebootMachineAction:
+    """Action that reboots a machine."""
 
     def generate_parameters(client):
-        status = client.get_status()
-        machines = list(m for m, d in status.iter_machines(containers=False))
-        return {'host_id': choice(machines)}
+        return {'machine_id': choose_machine(client)}
+
+    def get_up_since(client, machine_id):
+        """Return the date the machine has been up since."""
+        return client.get_juju_output('ssh', machine_id, 'uptime', '-s')
+
+    @classmethod
+    def perform(cls, client, machine_id):
+        """Add and remove many containers using the cli."""
+        up_since = cls.get_up_since(client, machine_id)
+        client.juju('ssh', (machine_id, 'sudo', 'reboot'), check=False)
+        for x in until_timeout(300):
+            try:
+                reboot_up_since = cls.get_up_since(client, machine_id)
+            except subprocess.CalledProcessError:
+                pass
+            else:
+                if up_since != reboot_up_since:
+                    break
+        else:
+            raise AssertionError('Unable to retrieve uptime.')
+
+
+class AddRemoveManyContainerAction:
+    """Action to add many containers, then remove them."""
+
+    def generate_parameters(client):
+        return {'host_id': choose_machine(client)}
 
     def perform(client, host_id):
         """Add and remove many containers using the cli."""
@@ -50,6 +92,28 @@ class AddRemoveManyContainerAction:
         new_cont = list(new_status.iter_new_machines(old_status,
                                                      containers=True))
         remove_and_wait(client, sorted(new_cont))
+
+
+class KillMongoDAction:
+    """Action to kill mongod."""
+
+    kill_script = (
+        'sudo pkill mongod;',
+        'echo -n Waiting for Mongodb to die;'
+        'while (pgrep mongod > /dev/null);', 'do',
+        '  echo -n .;'
+        '  sleep 1;',
+        'done;',
+        'echo',
+        )
+
+    def generate_parameters(client):
+        return {'machine_id': choose_machine(client.get_controller_client())}
+
+    @classmethod
+    def perform(cls, client, machine_id):
+        ctrl_client = client.get_controller_client()
+        ctrl_client.juju('ssh', (machine_id,) + cls.kill_script)
 
 
 def parse_args():
@@ -116,6 +180,8 @@ def default_actions():
     return Actions({
         'add_remove_many_machines': AddRemoveManyMachineAction,
         'add_remove_many_container': AddRemoveManyContainerAction,
+        'kill_mongod': KillMongoDAction,
+        'reboot_machine': RebootMachineAction,
         })
 
 

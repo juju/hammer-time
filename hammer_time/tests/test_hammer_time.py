@@ -14,9 +14,12 @@ from hammer_time.hammer_time import (
     Actions,
     AddRemoveManyContainerAction,
     AddRemoveManyMachineAction,
+    choose_machine,
     InvalidActionError,
+    KillMongoDAction,
     NoValidActionsError,
     random_plan,
+    RebootMachineAction,
     run_plan,
     )
 
@@ -27,6 +30,27 @@ def backend_call(client, cmd, args, model=None, check=True, timeout=None,
     return call(cmd, args, client.used_feature_flags,
                 client.env.juju_home, client._cmd_model(True, False), check,
                 timeout, extra_env, suppress_err=False)
+
+
+class TestChooseMachine(TestCase):
+
+    def test_choose_machine(self):
+        chosen = set()
+        client = fake_juju_client()
+        client.bootstrap()
+        client.juju('add-machine', ('-n', '2'))
+        for x in range(50):
+            chosen.add(choose_machine(client))
+            if chosen == {'0', '1'}:
+                break
+        else:
+            raise AssertionError('Did not choose each machine.')
+
+    def test_no_machines(self):
+        client = fake_juju_client()
+        client.bootstrap()
+        with self.assertRaises(InvalidActionError):
+            choose_machine(client)
 
 
 class TestAddRemoveManyMachineAction(TestCase):
@@ -74,6 +98,72 @@ class TestAddRemoveManyContainerAction(TestCase):
             backend_call(client, 'remove-machine', ('0/lxd/6',)),
             backend_call(client, 'remove-machine', ('0/lxd/7',)),
             ], juju_mock.mock_calls)
+
+
+class TestKillMongoDAction(TestCase):
+
+    def test_generate_parameters(self):
+        client = fake_juju_client()
+        client.bootstrap()
+        parameters = KillMongoDAction.generate_parameters(client)
+        self.assertEqual(parameters, {'machine_id': '0'})
+        controller_client = client.get_controller_client()
+        controller_client.juju('add-machine', ())
+        controller_client.remove_machine('0')
+        parameters = KillMongoDAction.generate_parameters(client)
+        self.assertEqual(parameters, {'machine_id': '1'})
+
+    def test_perform(self):
+        client = fake_juju_client()
+        client.bootstrap()
+        ctrl_client = client.get_controller_client()
+        with patch.object(ctrl_client._backend, 'juju',
+                          wraps=client._backend.juju) as juju_mock:
+            with patch.object(client, 'get_controller_client',
+                              return_value=ctrl_client):
+                with patch('time.sleep'):
+                    KillMongoDAction.perform(client, '0')
+        self.assertEqual([
+            backend_call(
+                ctrl_client, 'ssh',
+                ('0',) + KillMongoDAction.kill_script
+                ),
+            ], juju_mock.mock_calls)
+
+
+class TestRebootMachineAction(TestCase):
+
+    def test_generate_parameters(self):
+        client = fake_juju_client()
+        client.bootstrap()
+        with self.assertRaises(InvalidActionError):
+            parameters = RebootMachineAction.generate_parameters(client)
+
+        client.juju('add-machine', ('-n', '2'))
+        client.remove_machine('0')
+        parameters = RebootMachineAction.generate_parameters(client)
+        self.assertEqual(parameters, {'machine_id': '1'})
+
+    def test_perform(self):
+        client = fake_juju_client()
+        client.bootstrap()
+        client.juju('add-machine', ())
+        parameters = RebootMachineAction.generate_parameters(client)
+        with patch.object(client._backend, 'juju',
+                          wraps=client._backend.juju) as juju_mock:
+            with patch.object(client._backend, 'get_juju_output',
+                              autospec=True,
+                              side_effect=['earlier', 'now']) as jo_mock:
+                RebootMachineAction.perform(client, **parameters)
+        self.assertEqual([
+            backend_call(client, 'ssh', ('0', 'sudo', 'reboot'), check=False),
+            ], juju_mock.mock_calls)
+        expected_call = call(
+            'ssh', ('0', 'uptime', '-s'),
+            client.used_feature_flags, client.env.juju_home,
+            client._cmd_model(True, False),
+            user_name='admin')
+        self.assertEqual([expected_call, expected_call], jo_mock.mock_calls)
 
 
 class FixedOrderActions(Actions):
