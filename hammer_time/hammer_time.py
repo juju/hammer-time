@@ -1,40 +1,15 @@
-import asyncio
 from argparse import ArgumentParser
-from contextlib import contextmanager
+from random import (
+    choice,
+    shuffle,
+    )
 import logging
 
-from juju.application import Application
-from juju.client.connection import (
-    get_macaroons,
-    JujuData,
-    )
 from jujupy.client import ConditionList
-from juju.machine import Machine
-from juju.model import Model
 from jujupy import (
     client_for_existing,
     )
-from matrix import model
-from matrix.tasks.glitch.actions import action
-from matrix.tasks.glitch.plan import generate_plan
-from matrix.tasks.glitch.main import perform_action
 import yaml
-
-
-class ActionFailed(Exception):
-    """Raised when an action failed."""
-
-
-def get_auth_data(model_client):
-    """Get authentication data from a jujupy.ModelClient."""
-    jujudata = JujuData()
-    jujudata.path = model_client.env.juju_home
-    controller_name = model_client.env.controller.name
-    cacert = jujudata.controllers()[controller_name].get('ca-cert')
-    accounts = jujudata.accounts()[controller_name]
-    username = accounts['user']
-    password = accounts.get('password')
-    return cacert, username, password
 
 
 def remove_and_wait(client, machines):
@@ -44,64 +19,37 @@ def remove_and_wait(client, machines):
     client.wait_for(ConditionList(conditions))
 
 
-def cli_add_remove_many_machine(client):
-    """Add and removie many machines using the cli."""
-    old_status = client.get_status()
-    client.juju('add-machine', ('-n', '5'))
-    client.wait_for_started()
-    new_status = client.get_status()
-    remove_and_wait(client, new_status.iter_new_machines(old_status))
+class AddRemoveManyMachineAction:
+
+    def generate_parameters(client):
+        return {}
+
+    def perform(client):
+        """Add and removie many machines using the cli."""
+        old_status = client.get_status()
+        client.juju('add-machine', ('-n', '5'))
+        client.wait_for_started()
+        new_status = client.get_status()
+        remove_and_wait(client, new_status.iter_new_machines(old_status))
 
 
-def cli_add_remove_many_container(client, host_id):
-    """Add and remove many containers using the cli."""
-    old_status = client.get_status()
-    for count in range(8):
-        client.juju('add-machine', ('lxd:{}'.format(host_id)))
-    client.wait_for_started()
-    new_status = client.get_status()
-    new_cont = list(new_status.iter_new_machines(old_status,
-                                                 containers=True))
-    remove_and_wait(client, sorted(new_cont))
+class AddRemoveManyContainerAction:
 
+    def generate_parameters(client):
+        status = client.get_status()
+        machines = list(m for m, d in status.iter_machines(containers=False))
+        return {'host_id': choice(machines)}
 
-def add_cli_actions(client):
-    """Add cli-based actions.
-
-    This works because @action registers the callable with the Actions
-    singleton.
-    """
-    @action
-    async def add_remove_many_machine(
-            rule: model.Rule, model: Model, application: Application):
-        # Note: application is supplied only to make generate_plan /
-        # perform_action happy.  It is ignored.
-        cli_add_remove_many_machine(client)
-
-    @action
-    async def add_remove_many_container(
-            rule: model.Rule, model: Model, machine: Machine):
-        cli_add_remove_many_container(client, machine.id)
-
-
-@contextmanager
-def connected_model(loop, model_client):
-    """Use a jujupy.ModelClient to get a libjuju.Model."""
-    host, port = model_client.get_controller_endpoint()
-    if ':' in host:
-        host = host.join('[]')
-    endpoint = '{}:{}'.format(host, port)
-    cacert, username, password = get_auth_data(model_client)
-    macaroons = get_macaroons() if not password else None
-    model = Model(loop)
-    loop.run_until_complete(model.connect(
-        endpoint, model_client.get_model_uuid(), username, password, cacert,
-        macaroons,
-        ))
-    try:
-        yield model
-    finally:
-        loop.run_until_complete(model.disconnect())
+    def perform(client, host_id):
+        """Add and remove many containers using the cli."""
+        old_status = client.get_status()
+        for count in range(8):
+            client.juju('add-machine', ('lxd:{}'.format(host_id)))
+        client.wait_for_started()
+        new_status = client.get_status()
+        new_cont = list(new_status.iter_new_machines(old_status,
+                                                     containers=True))
+        remove_and_wait(client, sorted(new_cont))
 
 
 def parse_args():
@@ -127,22 +75,48 @@ def parse_args():
     return parser.parse_args()
 
 
-def is_workable_plan(client, plan):
-    """Check whether the supplied plan is workable for the current model.
+class InvalidActionError(Exception):
+    """Raised when the action is not valid for the client's model."""
 
-    Currently, this just checks whether the plan wants to remove the last unit
-    of an application.  More checks may be added in the future.
-    """
-    for plan_action in plan['actions']:
-        if plan_action['action'] == 'remove_unit':
-            status = client.get_status()
-            for selector in plan_action['selectors']:
-                if selector['selector'] == 'units':
-                    applications = status.get_applications()
-                    units = applications[selector['application']]['units']
-                    if len(units) < 2:
-                        return False
-    return True
+
+class NoValidActionsError(Exception):
+    """Raised when there are no valid actions for the client's model."""
+
+
+class Actions:
+
+    def __init__(self, initial_actions=None):
+        if initial_actions is None:
+            initial_actions = {}
+        self._actions = initial_actions
+
+    def list_arbitrary_actions(self):
+        """Iterate through all known actions in an arbitrary order."""
+        action_items = list(self._actions.items())
+        shuffle(action_items)
+        return action_items
+
+    def generate_step(self, client):
+        """Generate an arbitrary action with parameters."""
+        for name, cur_action in self.list_arbitrary_actions():
+            try:
+                return name, cur_action, cur_action.generate_parameters(client)
+            except InvalidActionError:
+                pass
+        else:
+            raise NoValidActionsError('No valid actions for model.')
+
+    def perform_step(self, client, step):
+        """Perform an action formatted as a step dictionary."""
+        ((name, parameters),) = step.items()
+        self._actions[name].perform(client, **parameters)
+
+
+def default_actions():
+    return Actions({
+        'add_remove_many_machines': AddRemoveManyMachineAction,
+        'add_remove_many_container': AddRemoveManyContainerAction,
+        })
 
 
 def random_plan(plan_file, juju_data, action_count):
@@ -151,44 +125,27 @@ def random_plan(plan_file, juju_data, action_count):
     This writes a randomly-generated plan file.
     :param plan_file: The filename for the plan.
     :param juju_data: The JUJU_DATA directory containing the model.
-    :param action_count: The number of Glitch actions the plan should include.
+    :param action_count: The number of actions the plan should include.
     """
     client = client_for_existing(None, juju_data)
-    add_cli_actions(client)
-    loop = asyncio.get_event_loop()
-    with connected_model(loop, client) as model:
-        while True:
-            plan = loop.run_until_complete(
-                generate_plan(None, model, action_count))
-            if is_workable_plan(client, plan):
-                break
-            logging.info('Generated unworkable plan.  Trying again.')
-    loop.close()
+    plan = []
+    actions = default_actions()
+    for step in range(action_count):
+        name, action, parameters = actions.generate_step(client)
+        plan.append({name: parameters})
     with open(plan_file, 'w') as f:
-        yaml.safe_dump(plan, f)
+        yaml.dump(plan, f)
 
 
-def run_glitch(plan, client):
-    """Run a Gitch plan against a Juju client.
+def run_plan(plan, client):
+    """Run a plan against a ModelClient.
 
-    :param plan: The parsed glitch plan.
-    :param client: The jujupy.ModelClient to run the plan against.
+    :param plan: The plan, as a list of dicts.
+    :param client: The jujupy.ModelClient to run the plan agains.
     """
-    add_cli_actions(client)
-    # Rule is a mandatory, statically-typed argument to perform_action and its
-    # callees.
-    rule = model.Rule(model.Task(command='glitch', args={'path': None}))
-    loop = asyncio.get_event_loop()
-    try:
-        with connected_model(loop, client) as juju_model:
-            for plan_action in plan['actions']:
-                logging.info('Performing action {}'.format(plan_action))
-                fname, failed = loop.run_until_complete(
-                    perform_action(plan_action, juju_model, rule))
-                if failed:
-                    raise ActionFailed()
-    finally:
-        loop.close()
+    actions = default_actions()
+    for step in plan:
+        actions.perform_step(client, step)
 
 
 def execute_plan(plan_file, juju_data):
@@ -202,7 +159,7 @@ def execute_plan(plan_file, juju_data):
     client = client_for_existing(None, juju_data)
     # Ensure the model is healthy before beginning.
     client.wait_for_started()
-    run_glitch(plan, client)
+    run_plan(plan, client)
     # Ensure the model is healthy after running the plan.
     client.wait_for_started()
 

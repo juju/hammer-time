@@ -1,2 +1,1 @@
-git+https://github.com/juju-solutions/matrix.git@3c8785f6a82b990a1976e16a374232595f12ad0c#matrix
 bzr+lp:juju-ci-tools@1924#jujupy

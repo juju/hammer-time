@@ -3,7 +3,7 @@ Hammer Time
 Test Juju's behaviour under non-ideal conditions, such as machines rebooting,
 processes dying, etc.
 
-It uses chaos-generating code from
+Its chaos-generating code is inspired by
 [Matrix](https://github.com/juju-solutions/matrix), but whereas Matrix is
 designed to test charms, Hammer Time tests Juju itself.
 
