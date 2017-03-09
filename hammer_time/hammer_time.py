@@ -50,7 +50,7 @@ class RebootMachineAction:
     def perform(client, machine_id):
         """Add and remove many containers using the cli."""
         old_status = client.get_status()
-        client.juju('ssh', (machine_id, 'sudo', 'reboot'))
+        client.juju('ssh', (machine_id, 'sudo', 'reboot'), check=False)
 
 
 class AddRemoveManyContainerAction:
@@ -148,6 +148,7 @@ def default_actions():
         'add_remove_many_machines': AddRemoveManyMachineAction,
         'add_remove_many_container': AddRemoveManyContainerAction,
         'kill_mongod': KillMongoDAction,
+        'reboot_machine': RebootMachineAction,
         })
 
 

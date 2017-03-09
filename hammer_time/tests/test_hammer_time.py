@@ -146,11 +146,12 @@ class TestRebootMachineAction(TestCase):
         client = fake_juju_client()
         client.bootstrap()
         client.juju('add-machine', ())
+        parameters = RebootMachineAction.generate_parameters(client)
         with patch.object(client._backend, 'juju',
                           wraps=client._backend.juju) as juju_mock:
-            RebootMachineAction.perform(client, '0')
+            RebootMachineAction.perform(client, **parameters)
         self.assertEqual([
-            backend_call(client, 'ssh', ('0', 'sudo', 'reboot')),
+            backend_call(client, 'ssh', ('0', 'sudo', 'reboot'), check=False),
             ], juju_mock.mock_calls)
 
 
