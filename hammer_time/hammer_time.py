@@ -4,12 +4,13 @@ from random import (
     shuffle,
     )
 import logging
-import time
+import subprocess
 
 from jujupy.client import ConditionList
 from jujupy import (
     client_for_existing,
     )
+from jujupy.utility import until_timeout
 import yaml
 
 
@@ -54,9 +55,25 @@ class RebootMachineAction:
     def generate_parameters(client):
         return {'machine_id': choose_machine(client)}
 
-    def perform(client, machine_id):
+    def get_up_since(client, machine_id):
+        """Return the date the machine has been up since."""
+        return client.get_juju_output('ssh', machine_id, 'uptime', '-s')
+
+    @classmethod
+    def perform(cls, client, machine_id):
         """Add and remove many containers using the cli."""
+        up_since = cls.get_up_since(client, machine_id)
         client.juju('ssh', (machine_id, 'sudo', 'reboot'), check=False)
+        for x in until_timeout(300):
+            try:
+                reboot_up_since = cls.get_up_since(client, machine_id)
+            except subprocess.CalledProcessError:
+                pass
+            else:
+                if up_since != reboot_up_since:
+                    break
+        else:
+            raise AssertionError('Unable to retrieve uptime.')
 
 
 class AddRemoveManyContainerAction:
@@ -80,14 +97,23 @@ class AddRemoveManyContainerAction:
 class KillMongoDAction:
     """Action to kill mongod."""
 
+    kill_script = (
+        'sudo pkill mongod;',
+        'echo -n Waiting for Mongodb to die;'
+        'while (pgrep mongod > /dev/null);', 'do',
+        '  echo -n .;'
+        '  sleep 1;',
+        'done;',
+        'echo',
+        )
+
     def generate_parameters(client):
         return {'machine_id': choose_machine(client.get_controller_client())}
 
-    def perform(client, machine_id):
+    @classmethod
+    def perform(cls, client, machine_id):
         ctrl_client = client.get_controller_client()
-        ctrl_client.juju('ssh', (machine_id, 'sudo', 'pkill', 'mongod'))
-        # The impact of killing mongod seems to be delayed.
-        time.sleep(5)
+        ctrl_client.juju('ssh', (machine_id,) + cls.kill_script)
 
 
 class AddUnitAction:
