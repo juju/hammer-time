@@ -40,8 +40,9 @@ class TestChooseMachine(TestCase):
         client = fake_juju_client()
         client.bootstrap()
         client.juju('add-machine', ('-n', '2'))
+        status = client.get_status()
         for x in range(50):
-            chosen.add(choose_machine(client))
+            chosen.add(choose_machine(status))
             if chosen == {'0', '1'}:
                 break
         else:
@@ -50,8 +51,9 @@ class TestChooseMachine(TestCase):
     def test_no_machines(self):
         client = fake_juju_client()
         client.bootstrap()
+        status = client.get_status()
         with self.assertRaises(InvalidActionError):
-            choose_machine(client)
+            choose_machine(status)
 
 
 class TestAddRemoveManyMachineAction(TestCase):
@@ -106,12 +108,14 @@ class TestKillMongoDAction(TestCase):
     def test_generate_parameters(self):
         client = fake_juju_client()
         client.bootstrap()
-        parameters = KillMongoDAction.generate_parameters(client)
+        parameters = KillMongoDAction.generate_parameters(
+            client, client.get_status())
         self.assertEqual(parameters, {'machine_id': '0'})
         controller_client = client.get_controller_client()
         controller_client.juju('add-machine', ())
         controller_client.remove_machine('0')
-        parameters = KillMongoDAction.generate_parameters(client)
+        parameters = KillMongoDAction.generate_parameters(
+            client, client.get_status())
         self.assertEqual(parameters, {'machine_id': '1'})
 
     def test_perform(self):
@@ -138,18 +142,21 @@ class TestRebootMachineAction(TestCase):
         client = fake_juju_client()
         client.bootstrap()
         with self.assertRaises(InvalidActionError):
-            parameters = RebootMachineAction.generate_parameters(client)
+            parameters = RebootMachineAction.generate_parameters(
+                client, client.get_status())
 
         client.juju('add-machine', ('-n', '2'))
         client.remove_machine('0')
-        parameters = RebootMachineAction.generate_parameters(client)
+        parameters = RebootMachineAction.generate_parameters(
+            client, client.get_status())
         self.assertEqual(parameters, {'machine_id': '1'})
 
     def test_perform(self):
         client = fake_juju_client()
         client.bootstrap()
         client.juju('add-machine', ())
-        parameters = RebootMachineAction.generate_parameters(client)
+        parameters = RebootMachineAction.generate_parameters(
+            client, client.get_status())
         with patch.object(client._backend, 'juju',
                           wraps=client._backend.juju) as juju_mock:
             with patch.object(client._backend, 'get_juju_output',
@@ -174,13 +181,14 @@ class TestAddUnitAction(TestCase):
         client.bootstrap()
         with self.assertRaisesRegex(InvalidActionError,
                                     'No applications to choose from.'):
-            AddUnitAction.generate_parameters(client)
+            AddUnitAction.generate_parameters(client, client.get_status())
         client.deploy('app1')
         client.deploy('app2')
         parameter_variations = set()
         for count in range(50):
             parameter_variations.add(
-                tuple(AddUnitAction.generate_parameters(client).items()))
+                tuple(AddUnitAction.generate_parameters(
+                    client, client.get_status()).items()))
             if parameter_variations == {
                         (('application', 'app1'),),
                         (('application', 'app2'),),
@@ -194,7 +202,8 @@ class TestAddUnitAction(TestCase):
         client = fake_juju_client()
         client.bootstrap()
         client.deploy('app1')
-        parameters = AddUnitAction.generate_parameters(client)
+        parameters = AddUnitAction.generate_parameters(
+            client, client.get_status())
         AddUnitAction.perform(client, **parameters)
         status = client.get_status()
         self.assertEqual(
@@ -217,7 +226,7 @@ class FooBarAction:
     def __init__(self, client):
         self.client = client
 
-    def generate_parameters(self, client):
+    def generate_parameters(self, client, status):
         assert self.client is client
         return {'foo': 'bar'}
 
@@ -263,11 +272,12 @@ class TestActions(TestCase):
 
     class InvalidAction:
 
-        def generate_parameters(client):
+        def generate_parameters(client, status):
             raise InvalidActionError()
 
     def test_generate_step(self):
         cur_client = fake_juju_client()
+        cur_client.bootstrap()
         foo_bar = FooBarAction(cur_client)
         actions = FixedOrderActions([('one', foo_bar)])
         self.assertEqual(actions.generate_step(cur_client),
@@ -275,6 +285,7 @@ class TestActions(TestCase):
 
     def test_generate_step_skip_invalid(self):
         cur_client = fake_juju_client()
+        cur_client.bootstrap()
         foo_bar = FooBarAction(cur_client)
         actions = FixedOrderActions([
             ('one', self.InvalidAction), ('two', foo_bar)])
@@ -282,10 +293,12 @@ class TestActions(TestCase):
                          ('two', foo_bar, {'foo': 'bar'}))
 
     def test_generate_step_no_valid(self):
+        cur_client = fake_juju_client()
+        cur_client.bootstrap()
         actions = FixedOrderActions([('one', self.InvalidAction)])
         with self.assertRaisesRegex(
                 NoValidActionsError, 'No valid actions for model.'):
-            actions.generate_step(None)
+            actions.generate_step(cur_client)
 
     def test_perform_step(self):
 
@@ -301,6 +314,7 @@ class TestRandomPlan(TestCase):
 
     def test_random_plan(self):
         cur_client = fake_juju_client()
+        cur_client.bootstrap()
         with patch('hammer_time.hammer_time.client_for_existing',
                    return_value=cur_client, autospec=True) as cfe_mock:
             foo_bar = FooBarAction(cur_client)
@@ -318,6 +332,7 @@ class TestRandomPlan(TestCase):
 
     def test_random_plan_force_action(self):
         cur_client = fake_juju_client()
+        cur_client.bootstrap()
         with patch('hammer_time.hammer_time.client_for_existing',
                    return_value=cur_client, autospec=True):
             with temp_dir() as plan_dir:

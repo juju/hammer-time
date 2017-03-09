@@ -23,7 +23,7 @@ def remove_and_wait(client, machines):
 
 class AddRemoveManyMachineAction:
 
-    def generate_parameters(client):
+    def generate_parameters(client, status):
         return {}
 
     def perform(client):
@@ -35,14 +35,13 @@ class AddRemoveManyMachineAction:
         remove_and_wait(client, new_status.iter_new_machines(old_status))
 
 
-def choose_machine(client):
+def choose_machine(status):
     """Choose a machine from the client's model at random.
 
     :param client: The ModelClient to get machines for.
     :return: a machine-id.
     :raises: InvalidActionError if there are no machines to choose from.
     """
-    status = client.get_status()
     machines = list(m for m, d in status.iter_machines(containers=False))
     if len(machines) == 0:
         raise InvalidActionError('No machines to choose from.')
@@ -52,8 +51,8 @@ def choose_machine(client):
 class RebootMachineAction:
     """Action that reboots a machine."""
 
-    def generate_parameters(client):
-        return {'machine_id': choose_machine(client)}
+    def generate_parameters(client, status):
+        return {'machine_id': choose_machine(status)}
 
     def get_up_since(client, machine_id):
         """Return the date the machine has been up since."""
@@ -79,8 +78,8 @@ class RebootMachineAction:
 class AddRemoveManyContainerAction:
     """Action to add many containers, then remove them."""
 
-    def generate_parameters(client):
-        return {'host_id': choose_machine(client)}
+    def generate_parameters(client, status):
+        return {'host_id': choose_machine(status)}
 
     def perform(client, host_id):
         """Add and remove many containers using the cli."""
@@ -107,8 +106,9 @@ class KillMongoDAction:
         'echo',
         )
 
-    def generate_parameters(client):
-        return {'machine_id': choose_machine(client.get_controller_client())}
+    def generate_parameters(client, status):
+        ctrl_client = client.get_controller_client()
+        return {'machine_id': choose_machine(ctrl_client.get_status())}
 
     @classmethod
     def perform(cls, client, machine_id):
@@ -119,7 +119,7 @@ class KillMongoDAction:
 class AddUnitAction:
     """Add a unit to a random application."""
 
-    def generate_parameters(client):
+    def generate_parameters(client, status):
         """Select a random application to add a unit to."""
         status = client.get_status()
         applications = list(status.get_applications())
@@ -185,9 +185,11 @@ class Actions:
 
     def generate_step(self, client):
         """Generate an arbitrary action with parameters."""
+        status = client.get_status()
         for name, cur_action in self.list_arbitrary_actions():
             try:
-                return name, cur_action, cur_action.generate_parameters(client)
+                return name, cur_action, cur_action.generate_parameters(client,
+                                                                        status)
             except InvalidActionError:
                 pass
         else:
