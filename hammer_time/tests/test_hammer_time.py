@@ -14,6 +14,7 @@ from hammer_time.hammer_time import (
     Actions,
     AddRemoveManyContainerAction,
     AddRemoveManyMachineAction,
+    choose_machine,
     InvalidActionError,
     KillMongoDAction,
     NoValidActionsError,
@@ -28,6 +29,21 @@ def backend_call(client, cmd, args, model=None, check=True, timeout=None,
     return call(cmd, args, client.used_feature_flags,
                 client.env.juju_home, client._cmd_model(True, False), check,
                 timeout, extra_env, suppress_err=False)
+
+
+class TestChooseMachine(TestCase):
+
+    def test_choose_machine(self):
+        chosen = set()
+        client = fake_juju_client()
+        client.bootstrap()
+        client.juju('add-machine', ('-n', '2'))
+        for x in range(50):
+            chosen.add(choose_machine(client))
+            if chosen == {'0', '1'}:
+                break
+        else:
+            raise AssertionError('Did not choose each machine.')
 
 
 class TestAddRemoveManyMachineAction(TestCase):
