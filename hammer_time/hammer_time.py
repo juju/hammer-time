@@ -4,7 +4,6 @@ from random import (
     shuffle,
     )
 import logging
-import time
 
 from jujupy.client import ConditionList
 from jujupy import (
@@ -80,14 +79,23 @@ class AddRemoveManyContainerAction:
 class KillMongoDAction:
     """Action to kill mongod."""
 
+    kill_script = (
+        'sudo pkill mongod;',
+        'echo -n Waiting for Mongodb to die;'
+        'while (pgrep mongod > /dev/null);', 'do',
+        '  echo -n .;'
+        '  sleep 1;',
+        'done;',
+        'echo',
+        )
+
     def generate_parameters(client):
         return {'machine_id': choose_machine(client.get_controller_client())}
 
-    def perform(client, machine_id):
+    @classmethod
+    def perform(cls, client, machine_id):
         ctrl_client = client.get_controller_client()
-        ctrl_client.juju('ssh', (machine_id, 'sudo', 'pkill', 'mongod'))
-        # The impact of killing mongod seems to be delayed.
-        time.sleep(5)
+        ctrl_client.juju('ssh', (machine_id,) + cls.kill_script)
 
 
 def parse_args():

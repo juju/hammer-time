@@ -124,7 +124,10 @@ class TestKillMongoDAction(TestCase):
                 with patch('time.sleep'):
                     KillMongoDAction.perform(client, '0')
         self.assertEqual([
-            backend_call(ctrl_client, 'ssh', ('0', 'sudo', 'pkill', 'mongod')),
+            backend_call(
+                ctrl_client, 'ssh',
+                ('0',) + KillMongoDAction.kill_script
+                ),
             ], juju_mock.mock_calls)
 
 
