@@ -47,7 +47,6 @@ class TestChooseMachine(TestCase):
             raise AssertionError('Did not choose each machine.')
 
     def test_no_machines(self):
-        chosen = set()
         client = fake_juju_client()
         client.bootstrap()
         with self.assertRaises(InvalidActionError):

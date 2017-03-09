@@ -56,7 +56,6 @@ class RebootMachineAction:
 
     def perform(client, machine_id):
         """Add and remove many containers using the cli."""
-        old_status = client.get_status()
         client.juju('ssh', (machine_id, 'sudo', 'reboot'), check=False)
 
 
