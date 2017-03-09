@@ -35,6 +35,12 @@ class AddRemoveManyMachineAction:
 
 
 def choose_machine(client):
+    """Choose a machine from the client's model at random.
+
+    :param client: The ModelClient to get machines for.
+    :return: a machine-id.
+    :raises: InvalidActionError if there are no machines to choose from.
+    """
     status = client.get_status()
     machines = list(m for m, d in status.iter_machines(containers=False))
     if len(machines) == 0:
@@ -43,6 +49,7 @@ def choose_machine(client):
 
 
 class RebootMachineAction:
+    """Action that reboots a machine."""
 
     def generate_parameters(client):
         return {'machine_id': choose_machine(client)}
@@ -54,6 +61,7 @@ class RebootMachineAction:
 
 
 class AddRemoveManyContainerAction:
+    """Action to add many containers, then remove them."""
 
     def generate_parameters(client):
         return {'host_id': choose_machine(client)}
