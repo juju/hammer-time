@@ -5,6 +5,7 @@ from random import (
     )
 import logging
 import subprocess
+import sys
 
 from jujupy.client import ConditionList
 from jujupy import (
@@ -132,6 +133,30 @@ class AddUnitAction:
         client.juju('add-unit', application)
 
 
+class RemoveUnitAction:
+    """Remove a random unit."""
+
+    def generate_parameters(client, status):
+        """Select a random application to add a unit to."""
+        status = client.get_status()
+        units = list(u for u, d in status.iter_units())
+        if len(units) == 0:
+            raise InvalidActionError('No units to choose from.')
+        return {'unit': choice(units)}
+
+    def perform(client, unit):
+        """Add a unit to an application."""
+        status = client.get_status()
+        for i_unit, data in status.iter_units():
+            if i_unit == unit:
+                unit_machine = data['machine']
+                break
+        else:
+            raise LookupError(unit)
+        client.juju('remove-unit', (unit,))
+        return client.make_remove_machine_condition(unit_machine)
+
+
 def parse_args():
     """Parse the arguments of this script."""
     parser = ArgumentParser()
@@ -198,7 +223,7 @@ class Actions:
     def perform_step(self, client, step):
         """Perform an action formatted as a step dictionary."""
         ((name, parameters),) = step.items()
-        self._actions[name].perform(client, **parameters)
+        return self._actions[name].perform(client, **parameters)
 
 
 def default_actions():
@@ -208,6 +233,7 @@ def default_actions():
         'add_unit': AddUnitAction,
         'kill_mongod': KillMongoDAction,
         'reboot_machine': RebootMachineAction,
+        'remove_unit': RemoveUnitAction,
         })
 
 
@@ -225,7 +251,11 @@ def random_plan(plan_file, juju_data, action_count, force_action):
     if force_action is not None:
         actions = Actions({force_action: actions._actions[force_action]})
     for step in range(action_count):
-        name, action, parameters = actions.generate_step(client)
+        try:
+            name, action, parameters = actions.generate_step(client)
+        except NoValidActionsError as e:
+            print(e, file=sys.stderr)
+            sys.exit(1)
         plan.append({name: parameters})
     with open(plan_file, 'w') as f:
         yaml.dump(plan, f)
@@ -235,11 +265,13 @@ def run_plan(plan, client):
     """Run a plan against a ModelClient.
 
     :param plan: The plan, as a list of dicts.
-    :param client: The jujupy.ModelClient to run the plan agains.
+    :param client: The jujupy.ModelClient to run the plan against.
     """
     actions = default_actions()
     for step in plan:
-        actions.perform_step(client, step)
+        condition = actions.perform_step(client, step)
+        if condition is not None:
+            client.wait_for(condition)
 
 
 def execute_plan(plan_file, juju_data):

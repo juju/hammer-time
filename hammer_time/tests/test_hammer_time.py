@@ -1,4 +1,5 @@
 from collections import OrderedDict
+from contextlib import contextmanager
 import os
 from unittest import TestCase
 from unittest.mock import (
@@ -21,6 +22,7 @@ from hammer_time.hammer_time import (
     NoValidActionsError,
     random_plan,
     RebootMachineAction,
+    RemoveUnitAction,
     run_plan,
     )
 
@@ -212,6 +214,44 @@ class TestAddUnitAction(TestCase):
             )
 
 
+class TestRemoveUnitAction(TestCase):
+
+    def test_generate_parameters(self):
+        client = fake_juju_client()
+        client.bootstrap()
+        with self.assertRaisesRegex(InvalidActionError,
+                                    'No units to choose from.'):
+            RemoveUnitAction.generate_parameters(client, client.get_status())
+        client.deploy('app1')
+        client.deploy('app2')
+        parameter_variations = set()
+        for count in range(50):
+            parameter_variations.add(
+                tuple(RemoveUnitAction.generate_parameters(
+                    client, client.get_status()).items()))
+            if parameter_variations == {
+                        (('unit', 'app1/0'),),
+                        (('unit', 'app2/0'),),
+                    }:
+                break
+        else:
+            raise AssertionError(
+                'One of the expected units was never selected.')
+
+    def test_perform_action(self):
+        client = fake_juju_client()
+        client.bootstrap()
+        client.deploy('app1')
+        parameters = RemoveUnitAction.generate_parameters(
+            client, client.get_status())
+        condition = RemoveUnitAction.perform(client, **parameters)
+        status = client.get_status()
+        self.assertEqual(
+            set(), {u for u, d in status.iter_units()})
+        expected = client.make_remove_machine_condition('0')
+        self.assertEqual(condition, expected)
+
+
 class FixedOrderActions(Actions):
 
     def __init__(self, items):
@@ -231,17 +271,36 @@ class FooBarAction:
         return {'foo': 'bar'}
 
 
+class WaitForException(Exception):
+    pass
+
+
+class RaiseCondition:
+
+    already_satisfied = False
+
+    timeout = None
+
+    @staticmethod
+    def iter_blocking_state(client):
+        raise WaitForException
+        yield
+
+
 class Step():
 
-    def __init__(self, test_case, client):
+    def __init__(self, test_case, client, wait_for=False):
         self.performed = False
         self.test_case = test_case
         self.client = client
+        self.wait_for = wait_for
 
     def perform(self, client, bar):
         self.test_case.assertEqual(bar, 'baz')
         self.test_case.assertIs(client, self.client)
         self.performed = True
+        if self.wait_for:
+            return RaiseCondition
 
 
 class TestActions(TestCase):
@@ -346,12 +405,23 @@ class TestRandomPlan(TestCase):
 
 class TestRunPlan(TestCase):
 
-    def test_run_plan(self):
-        client = fake_juju_client
-        step = Step(self, client)
+    @contextmanager
+    def run_cxt(self, wait_for=False):
+        client = fake_juju_client()
+        client.bootstrap()
+        step = Step(self, client, wait_for=wait_for)
         actions = Actions({'step': step})
         plan = [{'step': {'bar': 'baz'}}]
         with patch('hammer_time.hammer_time.default_actions',
                    autospec=True, return_value=actions):
+            yield client, plan, step
+
+    def test_run_plan(self):
+        with self.run_cxt() as (client, plan, step):
             run_plan(plan, client)
         self.assertIs(True, step.performed)
+
+    def test_run_plan_wait_for(self):
+        with self.run_cxt(wait_for=True) as (client, plan, step):
+            with self.assertRaises(WaitForException):
+                run_plan(plan, client)
