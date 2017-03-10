@@ -147,6 +147,8 @@ class RemoveUnitAction:
     def perform(client, unit):
         """Add a unit to an application."""
         status = client.get_status()
+        # It would be nice to use Status.get_unit, but it does not yet support
+        # Python 3.
         for i_unit, data in status.iter_units():
             if i_unit == unit:
                 unit_machine = data['machine']
