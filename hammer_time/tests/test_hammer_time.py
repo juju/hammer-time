@@ -14,6 +14,7 @@ from hammer_time.hammer_time import (
     Actions,
     AddRemoveManyContainerAction,
     AddRemoveManyMachineAction,
+    AddUnitAction,
     choose_machine,
     InvalidActionError,
     KillMongoDAction,
@@ -166,6 +167,42 @@ class TestRebootMachineAction(TestCase):
         self.assertEqual([expected_call, expected_call], jo_mock.mock_calls)
 
 
+class TestAddUnitAction(TestCase):
+
+    def test_generate_parameters(self):
+        client = fake_juju_client()
+        client.bootstrap()
+        with self.assertRaisesRegex(InvalidActionError,
+                                    'No applications to choose from.'):
+            AddUnitAction.generate_parameters(client)
+        client.deploy('app1')
+        client.deploy('app2')
+        parameter_variations = set()
+        for count in range(50):
+            parameter_variations.add(
+                tuple(AddUnitAction.generate_parameters(client).items()))
+            if parameter_variations == {
+                        (('application', 'app1'),),
+                        (('application', 'app2'),),
+                    }:
+                break
+        else:
+            raise AssertionError(
+                'One of the expected apps was never selected.')
+
+    def test_perform_action(self):
+        client = fake_juju_client()
+        client.bootstrap()
+        client.deploy('app1')
+        parameters = AddUnitAction.generate_parameters(client)
+        AddUnitAction.perform(client, **parameters)
+        status = client.get_status()
+        self.assertEqual(
+            {'app1/0', 'app1/1'},
+            {u for u, d in status.iter_units()},
+            )
+
+
 class FixedOrderActions(Actions):
 
     def __init__(self, items):
@@ -272,12 +309,24 @@ class TestRandomPlan(TestCase):
                 plan_file = os.path.join(plan_dir, 'asdf.yaml')
                 with patch('hammer_time.hammer_time.default_actions',
                            autospec=True, return_value=actions):
-                    random_plan(plan_file, 'fasd', 2)
+                    random_plan(plan_file, 'fasd', 2, None)
                 with open(plan_file) as f:
                     plan = yaml.load(f)
         cfe_mock.assert_called_once_with(None, 'fasd')
         self.assertEqual(plan, [
             {'one': {'foo': 'bar'}}, {'one': {'foo': 'bar'}}])
+
+    def test_random_plan_force_action(self):
+        cur_client = fake_juju_client()
+        with patch('hammer_time.hammer_time.client_for_existing',
+                   return_value=cur_client, autospec=True):
+            with temp_dir() as plan_dir:
+                plan_file = os.path.join(plan_dir, 'asdf.yaml')
+                random_plan(plan_file, 'fasd', 1, 'add_remove_many_machines')
+                with open(plan_file) as f:
+                    plan = yaml.load(f)
+        self.assertEqual(plan, [
+            {'add_remove_many_machines': {}}])
 
 
 class TestRunPlan(TestCase):

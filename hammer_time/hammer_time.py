@@ -116,6 +116,22 @@ class KillMongoDAction:
         ctrl_client.juju('ssh', (machine_id,) + cls.kill_script)
 
 
+class AddUnitAction:
+    """Add a unit to a random application."""
+
+    def generate_parameters(client):
+        """Select a random application to add a unit to."""
+        status = client.get_status()
+        applications = list(status.get_applications())
+        if len(applications) == 0:
+            raise InvalidActionError('No applications to choose from.')
+        return {'application': choice(applications)}
+
+    def perform(client, application):
+        """Add a unit to an application."""
+        client.juju('add-unit', application)
+
+
 def parse_args():
     """Parse the arguments of this script."""
     parser = ArgumentParser()
@@ -127,6 +143,13 @@ def parse_args():
     plan.set_defaults(func=random_plan)
     plan.add_argument('plan_file', help='The file to write to.')
     plan.add_argument('--juju-data', help='Location of JUJU_DATA.')
+    plan.add_argument('--force-action',
+                      help='Force the plan to use this action.',
+                      choices={
+                          k for k, v in
+                          default_actions().list_arbitrary_actions()
+                          }
+                      )
     plan.add_argument(
         '--action-count', help='Number of actions in the plan.  (default: 1)',
         default=1, type=int)
@@ -180,12 +203,13 @@ def default_actions():
     return Actions({
         'add_remove_many_machines': AddRemoveManyMachineAction,
         'add_remove_many_container': AddRemoveManyContainerAction,
+        'add_unit': AddUnitAction,
         'kill_mongod': KillMongoDAction,
         'reboot_machine': RebootMachineAction,
         })
 
 
-def random_plan(plan_file, juju_data, action_count):
+def random_plan(plan_file, juju_data, action_count, force_action):
     """Implement 'random-plan' subcommand.
 
     This writes a randomly-generated plan file.
@@ -196,6 +220,8 @@ def random_plan(plan_file, juju_data, action_count):
     client = client_for_existing(None, juju_data)
     plan = []
     actions = default_actions()
+    if force_action is not None:
+        actions = Actions({force_action: actions._actions[force_action]})
     for step in range(action_count):
         name, action, parameters = actions.generate_step(client)
         plan.append({name: parameters})
