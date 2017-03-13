@@ -138,6 +138,30 @@ class KillMongoDAction:
         ctrl_client.juju('ssh', (machine_id,) + cls.kill_script)
 
 
+class InterruptNetworkAction(MachineAction):
+
+    def get_command():
+        deny_in = "deny in to any"
+        deny_out = "deny out to any"
+        commands = [
+            "set -e",
+            "sudo ufw {}".format(deny_in),
+            "sudo ufw {}".format(deny_out),
+            "sudo ufw --force enable",
+            # UFW doesn't kill existing connections, so restart juju
+            "sudo pkill jujud",
+            "sleep 5m",
+            "sudo ufw disable",
+            "sudo ufw delete {}".format(deny_in),
+            "sudo ufw delete {}".format(deny_out),
+            ]
+        return '; '.join(commands)
+
+    @classmethod
+    def perform(cls, client, machine_id):
+        client.juju('ssh', (machine_id, cls.get_command()))
+
+
 class AddUnitAction:
     """Add a unit to a random application."""
 
@@ -254,6 +278,7 @@ def default_actions():
         'add_remove_many_machines': AddRemoveManyMachineAction,
         'add_remove_many_container': AddRemoveManyContainerAction,
         'add_unit': AddUnitAction,
+        'interrupt_network': InterruptNetworkAction,
         'kill_jujud': KillJujuDAction,
         'kill_mongod': KillMongoDAction,
         'reboot_machine': RebootMachineAction,

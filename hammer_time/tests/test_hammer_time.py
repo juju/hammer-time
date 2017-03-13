@@ -17,6 +17,7 @@ from hammer_time.hammer_time import (
     AddRemoveManyMachineAction,
     AddUnitAction,
     choose_machine,
+    InterruptNetworkAction,
     InvalidActionError,
     KillJujuDAction,
     KillMongoDAction,
@@ -58,6 +59,22 @@ class TestChooseMachine(TestCase):
         status = client.get_status()
         with self.assertRaises(InvalidActionError):
             choose_machine(status)
+
+
+class TestMachineAction(TestCase):
+
+    def test_generate_parameters(self):
+        client = fake_juju_client()
+        client.bootstrap()
+        with self.assertRaises(InvalidActionError):
+            parameters = MachineAction.generate_parameters(
+                client, client.get_status())
+
+        client.juju('add-machine', ('-n', '2'))
+        client.remove_machine('0')
+        parameters = MachineAction.generate_parameters(
+            client, client.get_status())
+        self.assertEqual(parameters, {'machine_id': '1'})
 
 
 class TestAddRemoveManyMachineAction(TestCase):
@@ -162,20 +179,21 @@ class TestKillMongoDAction(TestCase):
             ], juju_mock.mock_calls)
 
 
-class TestMachineAction(TestCase):
+class TestInterruptNetworkAction(TestCase):
 
-    def test_generate_parameters(self):
+    def test_perform(self):
         client = fake_juju_client()
         client.bootstrap()
-        with self.assertRaises(InvalidActionError):
-            parameters = MachineAction.generate_parameters(
-                client, client.get_status())
-
-        client.juju('add-machine', ('-n', '2'))
-        client.remove_machine('0')
-        parameters = MachineAction.generate_parameters(
-            client, client.get_status())
-        self.assertEqual(parameters, {'machine_id': '1'})
+        client.juju('add-machine', ())
+        with patch.object(client._backend, 'juju',
+                          wraps=client._backend.juju) as juju_mock:
+            perform(InterruptNetworkAction, client)
+        self.assertEqual([
+            backend_call(
+                client, 'ssh',
+                ('0', InterruptNetworkAction.get_command())
+                ),
+            ], juju_mock.mock_calls)
 
 
 class TestRebootMachineAction(TestCase):
