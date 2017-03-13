@@ -20,6 +20,7 @@ from hammer_time.hammer_time import (
     InvalidActionError,
     KillJujuDAction,
     KillMongoDAction,
+    MachineAction,
     NoValidActionsError,
     random_plan,
     RebootMachineAction,
@@ -85,7 +86,7 @@ class TestAddRemoveManyContainerAction(TestCase):
         client.juju('add-machine', ())
         with patch.object(client._backend, 'juju',
                           wraps=client._backend.juju) as juju_mock:
-            AddRemoveManyContainerAction.perform(client, '0')
+            perform(AddRemoveManyContainerAction, client)
         self.assertEqual([
             backend_call(client, 'add-machine', ('lxd:0')),
             backend_call(client, 'add-machine', ('lxd:0')),
@@ -113,14 +114,6 @@ def perform(cls, client):
 
 
 class TestKillJujuDAction(TestCase):
-
-    def test_generate_parameters(self):
-        client = fake_juju_client()
-        client.bootstrap()
-        client.juju('add-machine', ())
-        parameters = KillJujuDAction.generate_parameters(
-            client, client.get_status())
-        self.assertEqual(parameters, {'machine_id': '0'})
 
     def test_perform(self):
         client = fake_juju_client()
@@ -169,20 +162,23 @@ class TestKillMongoDAction(TestCase):
             ], juju_mock.mock_calls)
 
 
-class TestRebootMachineAction(TestCase):
+class TestMachineAction(TestCase):
 
     def test_generate_parameters(self):
         client = fake_juju_client()
         client.bootstrap()
         with self.assertRaises(InvalidActionError):
-            parameters = RebootMachineAction.generate_parameters(
+            parameters = MachineAction.generate_parameters(
                 client, client.get_status())
 
         client.juju('add-machine', ('-n', '2'))
         client.remove_machine('0')
-        parameters = RebootMachineAction.generate_parameters(
+        parameters = MachineAction.generate_parameters(
             client, client.get_status())
         self.assertEqual(parameters, {'machine_id': '1'})
+
+
+class TestRebootMachineAction(TestCase):
 
     def test_perform(self):
         client = fake_juju_client()

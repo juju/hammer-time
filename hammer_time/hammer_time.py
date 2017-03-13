@@ -49,11 +49,15 @@ def choose_machine(status):
     return choice(machines)
 
 
-class RebootMachineAction:
-    """Action that reboots a machine."""
+class MachineAction:
+    """Base class for actions that operate on machines."""
 
     def generate_parameters(client, status):
         return {'machine_id': choose_machine(status)}
+
+
+class RebootMachineAction(MachineAction):
+    """Action that reboots a machine."""
 
     def get_up_since(client, machine_id):
         """Return the date the machine has been up since."""
@@ -76,17 +80,14 @@ class RebootMachineAction:
             raise AssertionError('Unable to retrieve uptime.')
 
 
-class AddRemoveManyContainerAction:
+class AddRemoveManyContainerAction(MachineAction):
     """Action to add many containers, then remove them."""
 
-    def generate_parameters(client, status):
-        return {'host_id': choose_machine(status)}
-
-    def perform(client, host_id):
+    def perform(client, machine_id):
         """Add and remove many containers using the cli."""
         old_status = client.get_status()
         for count in range(8):
-            client.juju('add-machine', ('lxd:{}'.format(host_id)))
+            client.juju('add-machine', ('lxd:{}'.format(machine_id)))
         client.wait_for_started()
         new_status = client.get_status()
         new_cont = list(new_status.iter_new_machines(old_status,
@@ -94,7 +95,7 @@ class AddRemoveManyContainerAction:
         remove_and_wait(client, sorted(new_cont))
 
 
-class KillJujuDAction:
+class KillJujuDAction(MachineAction):
     """Action to kill jujud."""
 
     kill_script = (
@@ -109,16 +110,13 @@ class KillJujuDAction:
         'echo',
         )
 
-    def generate_parameters(client, status):
-        return {'machine_id': choose_machine(status)}
-
     @classmethod
     def perform(cls, client, machine_id):
         client.juju('ssh', (machine_id,) + cls.kill_script)
 
 
 class KillMongoDAction:
-    """Action to kill mongod."""
+    """Action to kill mongod.  This must operate on controller machine."""
 
     kill_script = (
         'sudo pkill mongod;',
