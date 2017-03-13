@@ -7,6 +7,7 @@ from unittest.mock import (
     patch,
     )
 
+from jujupy import Status
 from jujupy.fake import fake_juju_client
 from jujupy.utility import temp_dir
 import yaml
@@ -185,9 +186,13 @@ class TestInterruptNetworkAction(TestCase):
         client = fake_juju_client()
         client.bootstrap()
         client.juju('add-machine', ())
+        status = Status({'machines': {'0': {'juju-status': {
+            'current': 'down',
+            }}}}, '')
         with patch.object(client._backend, 'juju',
                           wraps=client._backend.juju) as juju_mock:
-            perform(InterruptNetworkAction, client)
+            with patch.object(client, 'get_status', return_value=status):
+                perform(InterruptNetworkAction, client)
         self.assertEqual([
             backend_call(
                 client, 'ssh',

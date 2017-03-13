@@ -7,7 +7,10 @@ import logging
 import subprocess
 import sys
 
-from jujupy.client import ConditionList
+from jujupy.client import (
+    BaseCondition,
+    ConditionList,
+    )
 from jujupy import (
     client_for_existing,
     )
@@ -138,28 +141,42 @@ class KillMongoDAction:
         ctrl_client.juju('ssh', (machine_id,) + cls.kill_script)
 
 
+class MachineDown(BaseCondition):
+
+    def __init__(self, machine_id):
+        super().__init__()
+        self.machine_id = machine_id
+
+    def iter_blocking_state(self, status):
+        juju_status = status.status['machines'][self.machine_id]['juju-status']
+        if juju_status['current'] != 'down':
+            yield self.machine_id, juju_status['current']
+
+
 class InterruptNetworkAction(MachineAction):
 
     def get_command():
-        deny_in = "deny in to any"
-        deny_out = "deny out to any"
+        deny_in = 'deny in to any'
+        deny_out = 'deny out to any'
+        restore = (
+            ' ufw disable;'
+            ' ufw delete {din};'
+            ' ufw delete {dout}'.format(din=deny_in, dout=deny_out))
         commands = [
-            "set -e",
-            "sudo ufw {}".format(deny_in),
-            "sudo ufw {}".format(deny_out),
-            "sudo ufw --force enable",
+            'set -eux',
+            'echo "{}"|sudo at now + 5 minutes'.format(restore),
+            'sudo ufw {}'.format(deny_in),
+            'sudo ufw {}'.format(deny_out),
+            'sudo ufw --force enable',
             # UFW doesn't kill existing connections, so restart juju
-            "sudo pkill jujud",
-            "sleep 5m",
-            "sudo ufw disable",
-            "sudo ufw delete {}".format(deny_in),
-            "sudo ufw delete {}".format(deny_out),
+            'sudo pkill jujud',
             ]
         return '; '.join(commands)
 
     @classmethod
     def perform(cls, client, machine_id):
         client.juju('ssh', (machine_id, cls.get_command()))
+        client.wait_for(MachineDown(machine_id), expected='down')
 
 
 class AddUnitAction:
