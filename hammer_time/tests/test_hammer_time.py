@@ -18,6 +18,7 @@ from hammer_time.hammer_time import (
     AddUnitAction,
     choose_machine,
     InvalidActionError,
+    KillJujuDAction,
     KillMongoDAction,
     NoValidActionsError,
     random_plan,
@@ -105,6 +106,37 @@ class TestAddRemoveManyContainerAction(TestCase):
             ], juju_mock.mock_calls)
 
 
+def perform(cls, client):
+    """Generate parameters and then perform with them."""
+    parameters = cls.generate_parameters(client, client.get_status())
+    return cls.perform(client, **parameters)
+
+
+class TestKillJujuDAction(TestCase):
+
+    def test_generate_parameters(self):
+        client = fake_juju_client()
+        client.bootstrap()
+        client.juju('add-machine', ())
+        parameters = KillJujuDAction.generate_parameters(
+            client, client.get_status())
+        self.assertEqual(parameters, {'machine_id': '0'})
+
+    def test_perform(self):
+        client = fake_juju_client()
+        client.bootstrap()
+        client.juju('add-machine', ())
+        with patch.object(client._backend, 'juju',
+                          wraps=client._backend.juju) as juju_mock:
+            perform(KillJujuDAction, client)
+        self.assertEqual([
+            backend_call(
+                client, 'ssh',
+                ('0',) + KillJujuDAction.kill_script
+                ),
+            ], juju_mock.mock_calls)
+
+
 class TestKillMongoDAction(TestCase):
 
     def test_generate_parameters(self):
@@ -128,8 +160,7 @@ class TestKillMongoDAction(TestCase):
                           wraps=client._backend.juju) as juju_mock:
             with patch.object(client, 'get_controller_client',
                               return_value=ctrl_client):
-                with patch('time.sleep'):
-                    KillMongoDAction.perform(client, '0')
+                perform(KillMongoDAction, client)
         self.assertEqual([
             backend_call(
                 ctrl_client, 'ssh',

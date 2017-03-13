@@ -94,6 +94,29 @@ class AddRemoveManyContainerAction:
         remove_and_wait(client, sorted(new_cont))
 
 
+class KillJujuDAction:
+    """Action to kill jujud."""
+
+    kill_script = (
+        'set -eu;',
+        'pid=$(pgrep jujud);'
+        'sudo kill $pid;',
+        'echo -n Waiting for jujud to die;'
+        'while (ps $pid > /dev/null);', 'do',
+        '  echo -n .;'
+        '  sleep 1;',
+        'done;',
+        'echo',
+        )
+
+    def generate_parameters(client, status):
+        return {'machine_id': choose_machine(status)}
+
+    @classmethod
+    def perform(cls, client, machine_id):
+        client.juju('ssh', (machine_id,) + cls.kill_script)
+
+
 class KillMongoDAction:
     """Action to kill mongod."""
 
@@ -233,6 +256,7 @@ def default_actions():
         'add_remove_many_machines': AddRemoveManyMachineAction,
         'add_remove_many_container': AddRemoveManyContainerAction,
         'add_unit': AddUnitAction,
+        'kill_jujud': KillJujuDAction,
         'kill_mongod': KillMongoDAction,
         'reboot_machine': RebootMachineAction,
         'remove_unit': RemoveUnitAction,
