@@ -8,8 +8,8 @@ import subprocess
 import sys
 
 from jujupy.client import (
-    BaseCondition,
     ConditionList,
+    MachineDown,
     )
 from jujupy import (
     client_for_existing,
@@ -141,42 +141,32 @@ class KillMongoDAction:
         ctrl_client.juju('ssh', (machine_id,) + cls.kill_script)
 
 
-class MachineDown(BaseCondition):
-
-    def __init__(self, machine_id):
-        super().__init__()
-        self.machine_id = machine_id
-
-    def iter_blocking_state(self, status):
-        juju_status = status.status['machines'][self.machine_id]['juju-status']
-        if juju_status['current'] != 'down':
-            yield self.machine_id, juju_status['current']
-
-
 class InterruptNetworkAction(MachineAction):
 
     def get_command():
-        deny_in = 'deny in to any'
-        deny_out = 'deny out to any'
-        restore = (
-            ' ufw disable;'
-            ' ufw delete {din};'
-            ' ufw delete {dout}'.format(din=deny_in, dout=deny_out))
+        deny_all = '; '.join([
+            'iptables --flush',
+            'iptables -P FORWARD DROP',
+            'iptables -P OUTPUT DROP',
+            'iptables -P INPUT DROP',
+            ])
+        restore = 'iptables-restore < $HOME/iptables'
         commands = [
             'set -eux',
-            'echo "{}"|sudo at now + 5 minutes'.format(restore),
-            'sudo ufw {}'.format(deny_in),
-            'sudo ufw {}'.format(deny_out),
-            'sudo ufw --force enable',
-            # UFW doesn't kill existing connections, so restart juju
-            'sudo pkill jujud',
+            'sudo iptables-save > $HOME/iptables',
+            'echo "{}"| sudo at now + 6 minutes'.format(restore),
+            'echo "{}"| sudo at now + 1 minutes'.format(deny_all),
             ]
         return '; '.join(commands)
 
     @classmethod
     def perform(cls, client, machine_id):
+        logging.info('Running: {}'.format(cls.get_command()))
         client.juju('ssh', (machine_id, cls.get_command()))
-        client.wait_for(MachineDown(machine_id), expected='down')
+        logging.info(
+            ('Waiting for juju to notice that {} is down, so that health'
+             ' check does not pass prematurely.').format(machine_id))
+        client.wait_for(MachineDown(machine_id))
 
 
 class AddUnitAction:
