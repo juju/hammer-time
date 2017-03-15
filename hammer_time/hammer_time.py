@@ -211,34 +211,38 @@ class RemoveUnitAction:
         return client.make_remove_machine_condition(unit_machine)
 
 
-def parse_args():
+def parse_args(argv=None):
     """Parse the arguments of this script."""
     parser = ArgumentParser()
     subparsers = parser.add_subparsers(dest='cmd')
     subparsers.required = True
-    plan = subparsers.add_parser(
-        'random-plan', description='Generate a random plan.'
+    rr_parser = subparsers.add_parser(
+        'run-random', description='Run random actions and record as a plan.'
         )
-    plan.set_defaults(func=random_plan)
-    plan.add_argument('plan_file', help='The file to write to.')
-    plan.add_argument('--juju-data', help='Location of JUJU_DATA.')
-    plan.add_argument('--force-action',
-                      help='Force the plan to use this action.',
-                      choices={
-                          k for k, v in
-                          default_actions().list_arbitrary_actions()
-                          }
-                      )
-    plan.add_argument(
-        '--action-count', help='Number of actions in the plan.  (default: 1)',
+    rr_parser.set_defaults(func=run_random)
+    rr_parser.add_argument('plan_file', help='The file to write to.')
+    rr_parser.add_argument('--juju-data', help='Location of JUJU_DATA.')
+    rr_parser.add_argument(
+        '--force-action',
+        help='Force the plan to use this action.',
+        choices={
+            k for k, v in
+            default_actions().list_arbitrary_actions()
+            }
+        )
+    rr_parser.add_argument(
+        '--action-count',
+        help='Number of actions in the rr_parser.  (default: 1)',
         default=1, type=int)
-
-    execute = subparsers.add_parser(
-        'execute', description='Execute a plan.')
-    execute.set_defaults(func=execute_plan)
-    execute.add_argument('plan_file', help='The file containing the plan.')
-    execute.add_argument('--juju-data', help='Location of JUJU_DATA.')
-    return parser.parse_args()
+    rr_parser.add_argument(
+        '--unsafe', help='Allow unsafe actions', action='store_true')
+    replay_parser = subparsers.add_parser(
+        'replay', description='Replay a plan from a previous run.')
+    replay_parser.set_defaults(func=replay)
+    replay_parser.add_argument('plan_file',
+                               help='The file containing the plan.')
+    replay_parser.add_argument('--juju-data', help='Location of JUJU_DATA.')
+    return parser.parse_args(argv)
 
 
 class InvalidActionError(Exception):
@@ -279,21 +283,35 @@ class Actions:
         ((name, parameters),) = step.items()
         return self._actions[name].perform(client, **parameters)
 
+    def do_step(self, client, step):
+        """Run a step against a ModelClient.
 
-def default_actions():
-    return Actions({
+        :param client: The jujupy.ModelClient to run the step against.
+        :param step: The step, as a dict.
+        """
+        condition = self.perform_step(client, step)
+        if condition is not None:
+            client.wait_for(condition)
+
+
+def default_actions(unsafe=False):
+    action_dict = {
         'add_remove_many_machines': AddRemoveManyMachineAction,
         'add_remove_many_container': AddRemoveManyContainerAction,
         'add_unit': AddUnitAction,
         'interrupt_network': InterruptNetworkAction,
         'kill_jujud': KillJujuDAction,
-        'kill_mongod': KillMongoDAction,
         'reboot_machine': RebootMachineAction,
         'remove_unit': RemoveUnitAction,
-        })
+        }
+    if unsafe:
+        action_dict.update({
+            'kill_mongod': KillMongoDAction,
+            })
+    return Actions(action_dict)
 
 
-def random_plan(plan_file, juju_data, action_count, force_action):
+def run_random(plan_file, juju_data, action_count, force_action, unsafe):
     """Implement 'random-plan' subcommand.
 
     This writes a randomly-generated plan file.
@@ -303,18 +321,22 @@ def random_plan(plan_file, juju_data, action_count, force_action):
     """
     client = client_for_existing(None, juju_data)
     plan = []
-    actions = default_actions()
     if force_action is not None:
+        actions = default_actions(unsafe=True)
         actions = Actions({force_action: actions._actions[force_action]})
-    for step in range(action_count):
+    else:
+        actions = default_actions(unsafe)
+    for step_num in range(action_count):
         try:
             name, action, parameters = actions.generate_step(client)
         except NoValidActionsError as e:
             print(e, file=sys.stderr)
             sys.exit(1)
-        plan.append({name: parameters})
-    with open(plan_file, 'w') as f:
-        yaml.dump(plan, f)
+        step = {name: parameters}
+        plan.append(step)
+        with open(plan_file, 'w') as f:
+            yaml.dump(plan, f)
+        actions.do_step(client, step)
 
 
 def run_plan(plan, client):
@@ -325,15 +347,13 @@ def run_plan(plan, client):
     """
     actions = default_actions()
     for step in plan:
-        condition = actions.perform_step(client, step)
-        if condition is not None:
-            client.wait_for(condition)
+        actions.do_step(client, step)
 
 
-def execute_plan(plan_file, juju_data):
-    """Implement the 'execute' subcommand.
+def replay(plan_file, juju_data):
+    """Implement the 'replay' subcommand.
 
-    :param plan_file: The filename of the plan file to execute.
+    :param plan_file: The filename of the plan file to replay.
     :param juju_data: Optional JUJU_DATA for a model to operate on.
     """
     with open(plan_file) as f:

@@ -1,3 +1,4 @@
+from argparse import Namespace
 from collections import OrderedDict
 from contextlib import contextmanager
 import os
@@ -18,13 +19,16 @@ from hammer_time.hammer_time import (
     AddRemoveManyMachineAction,
     AddUnitAction,
     choose_machine,
+    default_actions,
     InterruptNetworkAction,
     InvalidActionError,
     KillJujuDAction,
     KillMongoDAction,
     MachineAction,
     NoValidActionsError,
-    random_plan,
+    parse_args,
+    replay,
+    run_random,
     RebootMachineAction,
     RemoveUnitAction,
     run_plan,
@@ -302,6 +306,27 @@ class TestRemoveUnitAction(TestCase):
         self.assertEqual(condition, expected)
 
 
+class TestParseArgs(TestCase):
+
+    def test_run_random_defaults(self):
+        args = parse_args(['run-random', 'myplan'])
+        self.assertEqual(args, Namespace(
+            action_count=1, cmd='run-random', force_action=None,
+            func=run_random, juju_data=None, plan_file='myplan',
+            unsafe=False,
+            ))
+
+    def test_run_random_unsafe(self):
+        args = parse_args(['run-random', 'myplan', '--unsafe'])
+        self.assertIs(True, args.unsafe)
+
+    def test_replay_defaults(self):
+        args = parse_args(['replay', 'myplan'])
+        self.assertEqual(args, Namespace(
+            cmd='replay', func=replay, juju_data=None, plan_file='myplan',
+            ))
+
+
 class FixedOrderActions(Actions):
 
     def __init__(self, items):
@@ -313,12 +338,22 @@ class FixedOrderActions(Actions):
 
 class FooBarAction:
 
-    def __init__(self, client):
+    def __init__(self, client, wait_for=False, raise_exception=False):
         self.client = client
+        self.performed = False
+        self.wait_for = wait_for
+        self.raise_exception = raise_exception
 
     def generate_parameters(self, client, status):
         assert self.client is client
         return {'foo': 'bar'}
+
+    def perform(self, client, foo):
+        if self.raise_exception:
+            raise Exception()
+        self.performed = True
+        if self.wait_for:
+            return RaiseCondition
 
 
 class WaitForException(Exception):
@@ -419,38 +454,100 @@ class TestActions(TestCase):
         self.assertIs(True, step.performed)
 
 
-class TestRandomPlan(TestCase):
+@contextmanager
+def client_and_plan():
+    cur_client = fake_juju_client()
+    cur_client.bootstrap()
+    with patch('hammer_time.hammer_time.client_for_existing',
+               return_value=cur_client, autospec=True) as cfe_mock:
+        with temp_dir() as plan_dir:
+            plan_file = os.path.join(plan_dir, 'asdf.yaml')
+            yield (cur_client, cfe_mock, plan_file)
 
-    def test_random_plan(self):
-        cur_client = fake_juju_client()
-        cur_client.bootstrap()
-        with patch('hammer_time.hammer_time.client_for_existing',
-                   return_value=cur_client, autospec=True) as cfe_mock:
+
+@contextmanager
+def patch_actions(action_list):
+    actions = FixedOrderActions(action_list)
+    with patch('hammer_time.hammer_time.default_actions',
+               autospec=True, return_value=actions):
+        yield actions
+
+
+class TestRunRandom(TestCase):
+
+    def test_run_random(self):
+        with client_and_plan() as (cur_client, cfe_mock, plan_file):
             foo_bar = FooBarAction(cur_client)
-            actions = FixedOrderActions([('one', foo_bar)])
-            with temp_dir() as plan_dir:
-                plan_file = os.path.join(plan_dir, 'asdf.yaml')
-                with patch('hammer_time.hammer_time.default_actions',
-                           autospec=True, return_value=actions):
-                    random_plan(plan_file, 'fasd', 2, None)
-                with open(plan_file) as f:
-                    plan = yaml.load(f)
+            foo_bar_raise = FooBarAction(cur_client, wait_for=True)
+            with patch_actions([('one', foo_bar),
+                                ('two', foo_bar_raise)]) as actions:
+                with self.assertRaises(WaitForException):
+                    with patch.object(
+                            actions, 'list_arbitrary_actions',
+                            side_effect=[
+                                [('one', foo_bar)],
+                                [('two', foo_bar_raise)],
+                                ]):
+                        run_random(plan_file, 'fasd', 3, None,
+                                   unsafe=False)
+            with open(plan_file) as f:
+                plan = yaml.load(f)
+        self.assertIs(True, foo_bar.performed)
         cfe_mock.assert_called_once_with(None, 'fasd')
         self.assertEqual(plan, [
-            {'one': {'foo': 'bar'}}, {'one': {'foo': 'bar'}}])
+            {'one': {'foo': 'bar'}}, {'two': {'foo': 'bar'}}])
 
-    def test_random_plan_force_action(self):
-        cur_client = fake_juju_client()
-        cur_client.bootstrap()
-        with patch('hammer_time.hammer_time.client_for_existing',
-                   return_value=cur_client, autospec=True):
-            with temp_dir() as plan_dir:
-                plan_file = os.path.join(plan_dir, 'asdf.yaml')
-                random_plan(plan_file, 'fasd', 1, 'add_remove_many_machines')
-                with open(plan_file) as f:
-                    plan = yaml.load(f)
+    def test_run_random_force_action(self):
+        with client_and_plan() as (cur_client, cfe_mock, plan_file):
+            run_random(plan_file, 'fasd', 1, 'add_remove_many_machines',
+                       unsafe=False)
+            with open(plan_file) as f:
+                plan = yaml.load(f)
         self.assertEqual(plan, [
             {'add_remove_many_machines': {}}])
+
+    def test_run_random_action_exception(self):
+        # Even when a step raises an exception, its plan is still written.
+        with client_and_plan() as (cur_client, cfe_mock, plan_file):
+            foo_bar = FooBarAction(cur_client, raise_exception=True)
+            with patch_actions([('one', foo_bar)]):
+                with self.assertRaises(Exception):
+                    run_random(plan_file, 'fasd', 3, None, unsafe=False)
+            with open(plan_file) as f:
+                plan = yaml.load(f)
+        cfe_mock.assert_called_once_with(None, 'fasd')
+        self.assertEqual(plan, [
+            {'one': {'foo': 'bar'}}])
+
+    def test_run_random_unsafe_true(self):
+        with client_and_plan() as (cur_client, cfe_mock, plan_file):
+            with patch('hammer_time.hammer_time.default_actions',
+                       wraps=default_actions) as da_mock:
+                run_random(plan_file, 'fasd', 3, None, unsafe=True)
+        da_mock.assert_called_once_with(True)
+
+    def test_run_random_unsafe_false(self):
+        with client_and_plan() as (cur_client, cfe_mock, plan_file):
+            with patch('hammer_time.hammer_time.default_actions',
+                       wraps=default_actions) as da_mock:
+                run_random(plan_file, 'fasd', 3, None, unsafe=False)
+        da_mock.assert_called_once_with(False)
+
+    def test_run_random_unsafe_force_action(self):
+        with client_and_plan() as (cur_client, cfe_mock, plan_file):
+            with patch('hammer_time.hammer_time.default_actions',
+                       wraps=default_actions) as da_mock:
+                run_random(plan_file, 'fasd', 3, 'kill_mongod', unsafe=False)
+        da_mock.assert_called_once_with(unsafe=True)
+
+
+class TestDefaultActions(TestCase):
+
+    def test_unsafe(self):
+        actions = default_actions(unsafe=True)
+        self.assertIn('kill_mongod', actions._actions)
+        actions = default_actions(unsafe=False)
+        self.assertNotIn('kill_mongod', actions._actions)
 
 
 class TestRunPlan(TestCase):
