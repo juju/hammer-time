@@ -221,7 +221,6 @@ def parse_args(argv=None):
         )
     rr_parser.set_defaults(func=run_random)
     rr_parser.add_argument('plan_file', help='The file to write to.')
-    rr_parser.add_argument('--juju-data', help='Location of JUJU_DATA.')
     rr_parser.add_argument(
         '--force-action',
         help='Force the plan to use this action.',
@@ -241,7 +240,9 @@ def parse_args(argv=None):
     replay_parser.set_defaults(func=replay)
     replay_parser.add_argument('plan_file',
                                help='The file containing the plan.')
-    replay_parser.add_argument('--juju-data', help='Location of JUJU_DATA.')
+    for cur_parser in [rr_parser, replay_parser]:
+        cur_parser.add_argument('--juju-data', help='Location of JUJU_DATA.')
+        cur_parser.add_argument('--juju-bin', help='Location of juju binary.')
     return parser.parse_args(argv)
 
 
@@ -311,15 +312,21 @@ def default_actions(unsafe=False):
     return Actions(action_dict)
 
 
-def run_random(plan_file, juju_data, action_count, force_action, unsafe):
+def run_random(plan_file, juju_data, juju_bin, action_count, force_action,
+               unsafe):
     """Implement 'random-plan' subcommand.
 
     This writes a randomly-generated plan file.
     :param plan_file: The filename for the plan.
     :param juju_data: The JUJU_DATA directory containing the model.
+    :param juju_bin: Optional path of a juju binary to use.
     :param action_count: The number of actions the plan should include.
+    :param force_action: If non-None, the action to use for generating the
+        plan.
+    :param unsafe: If True, include known-unsafe operations in plans.  Has no
+        effect when force_action is supplied.
     """
-    client = client_for_existing(None, juju_data)
+    client = client_for_existing(juju_bin, juju_data)
     plan = []
     if force_action is not None:
         actions = default_actions(unsafe=True)
@@ -335,7 +342,7 @@ def run_random(plan_file, juju_data, action_count, force_action, unsafe):
         step = {name: parameters}
         plan.append(step)
         with open(plan_file, 'w') as f:
-            yaml.dump(plan, f)
+            yaml.safe_dump(plan, f)
         actions.do_step(client, step)
 
 
@@ -350,15 +357,16 @@ def run_plan(plan, client):
         actions.do_step(client, step)
 
 
-def replay(plan_file, juju_data):
+def replay(plan_file, juju_data, juju_bin):
     """Implement the 'replay' subcommand.
 
     :param plan_file: The filename of the plan file to replay.
     :param juju_data: Optional JUJU_DATA for a model to operate on.
+    :param juju_bin: Optional path of a juju binary to use.
     """
     with open(plan_file) as f:
         plan = yaml.safe_load(f)
-    client = client_for_existing(None, juju_data)
+    client = client_for_existing(juju_bin, juju_data)
     # Ensure the model is healthy before beginning.
     client.wait_for_started()
     run_plan(plan, client)
