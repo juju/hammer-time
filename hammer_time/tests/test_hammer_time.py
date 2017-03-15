@@ -313,18 +313,27 @@ class TestParseArgs(TestCase):
         self.assertEqual(args, Namespace(
             action_count=1, cmd='run-random', force_action=None,
             func=run_random, juju_data=None, plan_file='myplan',
-            unsafe=False,
+            unsafe=False, juju_bin=None,
             ))
 
     def test_run_random_unsafe(self):
         args = parse_args(['run-random', 'myplan', '--unsafe'])
         self.assertIs(True, args.unsafe)
 
+    def test_run_random_juju_bin(self):
+        args = parse_args(['run-random', 'myplan', '--juju-bin', 'asdf'])
+        self.assertEqual('asdf', args.juju_bin)
+
     def test_replay_defaults(self):
         args = parse_args(['replay', 'myplan'])
         self.assertEqual(args, Namespace(
             cmd='replay', func=replay, juju_data=None, plan_file='myplan',
+            juju_bin=None,
             ))
+
+    def test_replay_juju_bin(self):
+        args = parse_args(['replay', 'myplan', '--juju-bin', 'asdf'])
+        self.assertEqual('asdf', args.juju_bin)
 
 
 class FixedOrderActions(Actions):
@@ -488,7 +497,7 @@ class TestRunRandom(TestCase):
                                 [('one', foo_bar)],
                                 [('two', foo_bar_raise)],
                                 ]):
-                        run_random(plan_file, 'fasd', 3, None,
+                        run_random(plan_file, 'fasd', None, 3, None,
                                    unsafe=False)
             with open(plan_file) as f:
                 plan = yaml.load(f)
@@ -499,7 +508,7 @@ class TestRunRandom(TestCase):
 
     def test_run_random_force_action(self):
         with client_and_plan() as (cur_client, cfe_mock, plan_file):
-            run_random(plan_file, 'fasd', 1, 'add_remove_many_machines',
+            run_random(plan_file, 'fasd', None, 1, 'add_remove_many_machines',
                        unsafe=False)
             with open(plan_file) as f:
                 plan = yaml.load(f)
@@ -512,7 +521,7 @@ class TestRunRandom(TestCase):
             foo_bar = FooBarAction(cur_client, raise_exception=True)
             with patch_actions([('one', foo_bar)]):
                 with self.assertRaises(Exception):
-                    run_random(plan_file, 'fasd', 3, None, unsafe=False)
+                    run_random(plan_file, 'fasd', None, 3, None, unsafe=False)
             with open(plan_file) as f:
                 plan = yaml.load(f)
         cfe_mock.assert_called_once_with(None, 'fasd')
@@ -523,22 +532,31 @@ class TestRunRandom(TestCase):
         with client_and_plan() as (cur_client, cfe_mock, plan_file):
             with patch('hammer_time.hammer_time.default_actions',
                        wraps=default_actions) as da_mock:
-                run_random(plan_file, 'fasd', 3, None, unsafe=True)
+                run_random(plan_file, 'fasd', None, 3, None, unsafe=True)
         da_mock.assert_called_once_with(True)
 
     def test_run_random_unsafe_false(self):
         with client_and_plan() as (cur_client, cfe_mock, plan_file):
             with patch('hammer_time.hammer_time.default_actions',
                        wraps=default_actions) as da_mock:
-                run_random(plan_file, 'fasd', 3, None, unsafe=False)
+                run_random(plan_file, 'fasd', None, 3, None, unsafe=False)
         da_mock.assert_called_once_with(False)
 
     def test_run_random_unsafe_force_action(self):
         with client_and_plan() as (cur_client, cfe_mock, plan_file):
             with patch('hammer_time.hammer_time.default_actions',
                        wraps=default_actions) as da_mock:
-                run_random(plan_file, 'fasd', 3, 'kill_mongod', unsafe=False)
+                run_random(plan_file, 'fasd', None, 3, 'kill_mongod',
+                           unsafe=False)
         da_mock.assert_called_once_with(unsafe=True)
+
+    def test_run_random_juju_bin(self):
+        with client_and_plan() as (cur_client, cfe_mock, plan_file):
+            foo_bar = FooBarAction(cur_client)
+            with patch_actions([('one', foo_bar)]):
+                run_random(plan_file, 'fasd', 'juju1', 3, None,
+                           unsafe=False)
+        cfe_mock.assert_called_once_with('juju1', 'fasd')
 
 
 class TestDefaultActions(TestCase):
@@ -572,3 +590,13 @@ class TestRunPlan(TestCase):
         with self.run_cxt(wait_for=True) as (client, plan, step):
             with self.assertRaises(WaitForException):
                 run_plan(plan, client)
+
+
+class TestReplay(TestCase):
+
+    def test_run_random_juju_bin(self):
+        with client_and_plan() as (cur_client, cfe_mock, plan_file):
+            with open(plan_file, 'w') as f:
+                yaml.safe_dump([], f)
+            replay(plan_file, 'fasd', 'juju1')
+        cfe_mock.assert_called_once_with('juju1', 'fasd')
