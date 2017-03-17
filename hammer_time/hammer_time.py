@@ -72,6 +72,8 @@ class MachineAction:
 class RebootMachineAction(MachineAction):
     """Action that reboots a machine."""
 
+    skip_windows = True
+
     def get_up_since(client, machine_id):
         """Return the date the machine has been up since."""
         return client.get_juju_output('ssh', machine_id, 'uptime', '-s')
@@ -96,6 +98,8 @@ class RebootMachineAction(MachineAction):
 class AddRemoveManyContainerAction(MachineAction):
     """Action to add many containers, then remove them."""
 
+    skip_windows = True
+
     def perform(client, machine_id):
         """Add and remove many containers using the cli."""
         old_status = client.get_status()
@@ -110,6 +114,8 @@ class AddRemoveManyContainerAction(MachineAction):
 
 class KillJujuDAction(MachineAction):
     """Action to kill jujud."""
+
+    skip_windows = True
 
     kill_script = (
         'set -eu;',
@@ -152,6 +158,8 @@ class KillMongoDAction:
 
 
 class InterruptNetworkAction(MachineAction):
+
+    skip_windows = True
 
     def get_command():
         deny_all = '; '.join([
