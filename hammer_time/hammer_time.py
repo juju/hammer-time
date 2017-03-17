@@ -1,4 +1,5 @@
 from argparse import ArgumentParser
+from contextlib import contextmanager
 from random import (
     choice,
     shuffle,
@@ -326,24 +327,24 @@ def run_random(plan_file, juju_data, juju_bin, action_count, force_action,
     :param unsafe: If True, include known-unsafe operations in plans.  Has no
         effect when force_action is supplied.
     """
-    client = client_for_existing(juju_bin, juju_data)
-    plan = []
-    if force_action is not None:
-        actions = default_actions(unsafe=True)
-        actions = Actions({force_action: actions._actions[force_action]})
-    else:
-        actions = default_actions(unsafe)
-    for step_num in range(action_count):
-        try:
-            name, action, parameters = actions.generate_step(client)
-        except NoValidActionsError as e:
-            print(e, file=sys.stderr)
-            sys.exit(1)
-        step = {name: parameters}
-        plan.append(step)
-        with open(plan_file, 'w') as f:
-            yaml.safe_dump(plan, f)
-        actions.do_step(client, step)
+    with checked_client(juju_bin, juju_data) as client:
+        plan = []
+        if force_action is not None:
+            actions = default_actions(unsafe=True)
+            actions = Actions({force_action: actions._actions[force_action]})
+        else:
+            actions = default_actions(unsafe)
+        for step_num in range(action_count):
+            try:
+                name, action, parameters = actions.generate_step(client)
+            except NoValidActionsError as e:
+                print(e, file=sys.stderr)
+                sys.exit(1)
+            step = {name: parameters}
+            plan.append(step)
+            with open(plan_file, 'w') as f:
+                yaml.safe_dump(plan, f)
+            actions.do_step(client, step)
 
 
 def run_plan(plan, client):
@@ -357,6 +358,16 @@ def run_plan(plan, client):
         actions.do_step(client, step)
 
 
+@contextmanager
+def checked_client(juju_bin, juju_data):
+    client = client_for_existing(juju_bin, juju_data)
+    # Ensure the model is healthy before beginning.
+    client.wait_for_started()
+    yield client
+    # Ensure the model is healthy after running the plan.
+    client.wait_for_started()
+
+
 def replay(plan_file, juju_data, juju_bin):
     """Implement the 'replay' subcommand.
 
@@ -366,12 +377,8 @@ def replay(plan_file, juju_data, juju_bin):
     """
     with open(plan_file) as f:
         plan = yaml.safe_load(f)
-    client = client_for_existing(juju_bin, juju_data)
-    # Ensure the model is healthy before beginning.
-    client.wait_for_started()
-    run_plan(plan, client)
-    # Ensure the model is healthy after running the plan.
-    client.wait_for_started()
+    with checked_client(juju_bin, juju_data) as client:
+        run_plan(plan, client)
 
 
 def main():
