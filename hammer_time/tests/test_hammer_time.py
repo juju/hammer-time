@@ -9,6 +9,7 @@ from unittest.mock import (
     )
 
 from jujupy import Status
+from jujupy.client import ProvisioningError
 from jujupy.fake import fake_juju_client
 from jujupy.utility import temp_dir
 import yaml
@@ -557,6 +558,41 @@ class TestRunRandom(TestCase):
                 run_random(plan_file, 'fasd', 'juju1', 3, None,
                            unsafe=False)
         cfe_mock.assert_called_once_with('juju1', 'fasd')
+
+    def test_run_random_checks_before(self):
+        error_status = {'machines': {'0': {'machine-status': {
+            'current': 'provisioning error',
+            }}}}
+        with client_and_plan() as (client, cfe_mock, plan_file):
+            foo_bar_raise = FooBarAction(client, raise_exception=True)
+            models = client._backend.controller_state.models
+            model_state = models[client.model_name]
+            with patch.object(model_state, 'get_status_dict',
+                              return_value=error_status, autospec=True):
+                with self.assertRaises(ProvisioningError):
+                    with patch_actions([('one', foo_bar_raise)]):
+                        run_random(plan_file, 'fasd', 'juju1', 1, None,
+                                   unsafe=False)
+
+    def test_run_random_checks_after(self):
+        status = {'machines': {}}
+
+        def perform(foo_bar_self, client, foo):
+            status['machines'].update({
+                '0': {'machine-status': {'current': 'provisioning error'}}
+                })
+
+        with client_and_plan() as (client, cfe_mock, plan_file):
+            foo_bar = FooBarAction(client)
+            models = client._backend.controller_state.models
+            model_state = models[client.model_name]
+            with patch.object(model_state, 'get_status_dict',
+                              return_value=status, autospec=True):
+                with patch.object(FooBarAction, 'perform', perform):
+                    with patch_actions([('one', foo_bar)]):
+                        with self.assertRaises(ProvisioningError):
+                            run_random(plan_file, 'fasd', 'juju1', 1, None,
+                                       unsafe=False)
 
 
 class TestDefaultActions(TestCase):
