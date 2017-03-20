@@ -669,13 +669,20 @@ class TestRunPlan(TestCase):
 
 class TestCheckedClient(TestCase):
 
-    def test_juju_data(self):
+    def test_juju_data_default(self):
         with patch.object(ht, 'client_for_existing') as cfe_mock:
             with patch.dict(os.environ, {'JUJU_DATA': 'bar'}):
                 with checked_client('foo', None) as client:
                     pass
         self.assertIs(client, cfe_mock.return_value)
         cfe_mock.assert_called_once_with('foo', 'bar')
+
+    def test_juju_data_supplied(self):
+        with patch.object(ht, 'client_for_existing') as cfe_mock:
+            with patch.dict(os.environ, {'JUJU_DATA': 'bar'}):
+                with checked_client('foo', 'qux'):
+                    pass
+        cfe_mock.assert_called_once_with('foo', 'qux')
 
 
 class TestReplay(TestCase):
