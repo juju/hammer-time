@@ -9,6 +9,7 @@ import subprocess
 import sys
 
 from jujupy.client import (
+    BaseCondition,
     ConditionList,
     MachineDown,
     )
@@ -77,13 +78,15 @@ class RebootMachineAction(MachineAction):
 
     def get_up_since(client, machine_id):
         """Return the date the machine has been up since."""
-        return client.get_juju_output('ssh', machine_id, 'uptime', '-s')
+        return client.get_juju_output('run', '--machine', machine_id,
+                                      'uptime -s')
 
     @classmethod
     def perform(cls, client, machine_id):
         """Add and remove many containers using the cli."""
         up_since = cls.get_up_since(client, machine_id)
-        client.juju('ssh', (machine_id, 'sudo', 'reboot'), check=False)
+        client.juju('run', ('--machine', machine_id, 'sudo', 'reboot'),
+                    check=False)
         for x in until_timeout(300):
             try:
                 reboot_up_since = cls.get_up_since(client, machine_id)
@@ -113,6 +116,25 @@ class AddRemoveManyContainerAction(MachineAction):
         remove_and_wait(client, sorted(new_cont))
 
 
+class RunAvailable(BaseCondition):
+    """Indicates whether the run operation is available.
+
+    This is a good indicator that the machine is up and running properly.
+    """
+
+    def __init__(self, client, machine_id):
+        super().__init__()
+        self.client = client
+        self.machine_id = machine_id
+
+    def iter_blocking_state(self, status):
+        exit_status = self.client.juju('run', (
+            '--machine', self.machine_id, 'exit 0', '--timeout', '20s'
+            ), check=False)
+        if exit_status != 0:
+            yield (self.machine_id, 'cannot-run')
+
+
 class KillJujuDAction(MachineAction):
     """Action to kill jujud."""
 
@@ -132,6 +154,7 @@ class KillJujuDAction(MachineAction):
 
     @classmethod
     def perform(cls, client, machine_id):
+        client.wait_for(RunAvailable(client, machine_id))
         client.juju('ssh', (machine_id,) + cls.kill_script)
 
 
@@ -155,6 +178,7 @@ class KillMongoDAction:
     @classmethod
     def perform(cls, client, machine_id):
         ctrl_client = client.get_controller_client()
+        ctrl_client.wait_for(RunAvailable(client, machine_id))
         ctrl_client.juju('ssh', (machine_id,) + cls.kill_script)
 
 
@@ -181,7 +205,9 @@ class InterruptNetworkAction(MachineAction):
     @classmethod
     def perform(cls, client, machine_id):
         logging.info('Running: {}'.format(cls.get_command()))
-        client.juju('ssh', (machine_id, cls.get_command()))
+        # Ensure we are not *already* down from some previous operation.
+        client.wait_for_started()
+        client.juju('run', ('--machine', machine_id, cls.get_command()))
         logging.info(
             ('Waiting for juju to notice that {} is down, so that health'
              ' check does not pass prematurely.').format(machine_id))

@@ -34,6 +34,7 @@ from hammer_time.hammer_time import (
     NoValidActionsError,
     parse_args,
     replay,
+    RunAvailable,
     run_random,
     RebootMachineAction,
     RemoveUnitAction,
@@ -182,7 +183,9 @@ class TestKillJujuDAction(TestCase):
         client.juju('add-machine', ())
         with patch.object(client._backend, 'juju',
                           wraps=client._backend.juju) as juju_mock:
-            perform(KillJujuDAction, client)
+            with patch.object(RunAvailable, 'iter_blocking_state',
+                              return_value=iter([])):
+                perform(KillJujuDAction, client)
         self.assertEqual([
             backend_call(
                 client, 'ssh',
@@ -214,13 +217,15 @@ class TestKillMongoDAction(TestCase):
                           wraps=client._backend.juju) as juju_mock:
             with patch.object(client, 'get_controller_client',
                               return_value=ctrl_client):
-                perform(KillMongoDAction, client)
-        self.assertEqual([
-            backend_call(
-                ctrl_client, 'ssh',
-                ('0',) + KillMongoDAction.kill_script
-                ),
-            ], juju_mock.mock_calls)
+                with patch.object(RunAvailable, 'iter_blocking_state',
+                                  return_value=iter([])):
+                            perform(KillMongoDAction, client)
+            self.assertEqual([
+                backend_call(
+                    ctrl_client, 'ssh',
+                    ('0',) + KillMongoDAction.kill_script
+                    ),
+                ], juju_mock.mock_calls)
 
 
 class TestInterruptNetworkAction(TestCase):
@@ -229,18 +234,23 @@ class TestInterruptNetworkAction(TestCase):
         client = fake_juju_client()
         client.bootstrap()
         client.juju('add-machine', ())
-        status = Status({'machines': {'0': {
+        up_status = Status({'machines': {'0': {
+            'juju-status': {'current': 'started'},
+            'series': 'angsty',
+            }}}, '')
+        down_status = Status({'machines': {'0': {
             'juju-status': {'current': 'down'},
             'series': 'angsty',
             }}}, '')
         with patch.object(client._backend, 'juju',
                           wraps=client._backend.juju) as juju_mock:
-            with patch.object(client, 'get_status', return_value=status):
+            with patch.object(client, 'get_status', side_effect=[
+                              up_status, up_status, down_status]):
                 perform(InterruptNetworkAction, client)
         self.assertEqual([
             backend_call(
-                client, 'ssh',
-                ('0', InterruptNetworkAction.get_command())
+                client, 'run',
+                ('--machine', '0', InterruptNetworkAction.get_command())
                 ),
             ], juju_mock.mock_calls)
 
@@ -260,10 +270,11 @@ class TestRebootMachineAction(TestCase):
                               side_effect=['earlier', 'now']) as jo_mock:
                 RebootMachineAction.perform(client, **parameters)
         self.assertEqual([
-            backend_call(client, 'ssh', ('0', 'sudo', 'reboot'), check=False),
+            backend_call(client, 'run', ('--machine', '0', 'sudo', 'reboot'),
+                         check=False),
             ], juju_mock.mock_calls)
         expected_call = call(
-            'ssh', ('0', 'uptime', '-s'),
+            'run', ('--machine', '0', 'uptime', '-s'),
             client.used_feature_flags, client.env.juju_home,
             client._cmd_model(True, False),
             user_name='admin')
@@ -572,7 +583,9 @@ class TestRunRandom(TestCase):
         with client_and_plan() as (cur_client, cfe_mock, plan_file):
             with patch('hammer_time.hammer_time.default_actions',
                        wraps=default_actions) as da_mock:
-                run_random(plan_file, 'fasd', None, 3, None, unsafe=True)
+                with patch.object(RunAvailable, 'iter_blocking_state',
+                                  return_value=iter([])):
+                    run_random(plan_file, 'fasd', None, 3, None, unsafe=True)
         da_mock.assert_called_once_with(True)
 
     def test_run_random_unsafe_false(self):
@@ -586,8 +599,10 @@ class TestRunRandom(TestCase):
         with client_and_plan() as (cur_client, cfe_mock, plan_file):
             with patch('hammer_time.hammer_time.default_actions',
                        wraps=default_actions) as da_mock:
-                run_random(plan_file, 'fasd', None, 3, 'kill_mongod',
-                           unsafe=False)
+                with patch.object(RunAvailable, 'iter_blocking_state',
+                                  return_value=iter([])):
+                        run_random(plan_file, 'fasd', None, 3, 'kill_mongod',
+                                   unsafe=False)
         da_mock.assert_called_once_with(unsafe=True)
 
     def test_run_random_juju_bin(self):
