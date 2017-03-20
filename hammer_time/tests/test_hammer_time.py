@@ -1,7 +1,6 @@
 from argparse import Namespace
 from collections import OrderedDict
 from contextlib import contextmanager
-import json
 import os
 from unittest import TestCase
 from unittest.mock import (
@@ -18,11 +17,13 @@ from jujupy.fake import (
 from jujupy.utility import temp_dir
 import yaml
 
+from hammer_time import hammer_time as ht
 from hammer_time.hammer_time import (
     Actions,
     AddRemoveManyContainerAction,
     AddRemoveManyMachineAction,
     AddUnitAction,
+    checked_client,
     choose_machine,
     default_actions,
     InterruptNetworkAction,
@@ -229,7 +230,7 @@ class TestInterruptNetworkAction(TestCase):
         client.bootstrap()
         client.juju('add-machine', ())
         status = Status({'machines': {'0': {
-            'juju-status': { 'current': 'down'},
+            'juju-status': {'current': 'down'},
             'series': 'angsty',
             }}}, '')
         with patch.object(client._backend, 'juju',
@@ -664,6 +665,17 @@ class TestRunPlan(TestCase):
         with self.run_cxt(wait_for=True) as (client, plan, step):
             with self.assertRaises(WaitForException):
                 run_plan(plan, client)
+
+
+class TestCheckedClient(TestCase):
+
+    def test_juju_data(self):
+        with patch.object(ht, 'client_for_existing') as cfe_mock:
+            with patch.dict(os.environ, {'JUJU_DATA': 'bar'}):
+                with checked_client('foo', None) as client:
+                    pass
+        self.assertIs(client, cfe_mock.return_value)
+        cfe_mock.assert_called_once_with('foo', 'bar')
 
 
 class TestReplay(TestCase):

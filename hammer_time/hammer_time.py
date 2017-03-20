@@ -14,6 +14,7 @@ from jujupy.client import (
     )
 from jujupy import (
     client_for_existing,
+    get_juju_data,
     )
 from jujupy.utility import until_timeout
 import yaml
@@ -377,6 +378,8 @@ def run_plan(plan, client):
 
 @contextmanager
 def checked_client(juju_bin, juju_data):
+    if juju_data is None:
+        juju_data = get_juju_data()
     client = client_for_existing(juju_bin, juju_data)
     # Ensure the model is healthy before beginning.
     client.wait_for_started()
