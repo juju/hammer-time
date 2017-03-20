@@ -40,28 +40,39 @@ class AddRemoveManyMachineAction:
         remove_and_wait(client, new_status.iter_new_machines(old_status))
 
 
-def choose_machine(status):
+def choose_machine(status, skip_windows=False):
     """Choose a machine from the client's model at random.
 
     :param client: The ModelClient to get machines for.
+    :param skip_windows: If true, skip Windows machines when choosing the
+        client.
     :return: a machine-id.
     :raises: InvalidActionError if there are no machines to choose from.
     """
-    machines = list(m for m, d in status.iter_machines(containers=False))
-    if len(machines) == 0:
+    machines = status.iter_machines(containers=False)
+    if skip_windows:
+        machines = [(m, d) for m, d in machines
+                    if not d['series'].startswith('win')]
+    machine_ids = [m for m, d in machines]
+    if len(machine_ids) == 0:
         raise InvalidActionError('No machines to choose from.')
-    return choice(machines)
+    return choice(machine_ids)
 
 
 class MachineAction:
     """Base class for actions that operate on machines."""
 
-    def generate_parameters(client, status):
-        return {'machine_id': choose_machine(status)}
+    skip_windows = False
+
+    @classmethod
+    def generate_parameters(cls, client, status):
+        return {'machine_id': choose_machine(status, cls.skip_windows)}
 
 
 class RebootMachineAction(MachineAction):
     """Action that reboots a machine."""
+
+    skip_windows = True
 
     def get_up_since(client, machine_id):
         """Return the date the machine has been up since."""
@@ -87,6 +98,8 @@ class RebootMachineAction(MachineAction):
 class AddRemoveManyContainerAction(MachineAction):
     """Action to add many containers, then remove them."""
 
+    skip_windows = True
+
     def perform(client, machine_id):
         """Add and remove many containers using the cli."""
         old_status = client.get_status()
@@ -101,6 +114,8 @@ class AddRemoveManyContainerAction(MachineAction):
 
 class KillJujuDAction(MachineAction):
     """Action to kill jujud."""
+
+    skip_windows = True
 
     kill_script = (
         'set -eu;',
@@ -143,6 +158,8 @@ class KillMongoDAction:
 
 
 class InterruptNetworkAction(MachineAction):
+
+    skip_windows = True
 
     def get_command():
         deny_all = '; '.join([

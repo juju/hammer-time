@@ -1,1 +1,1 @@
-bzr+lp:juju-ci-tools@1934#jujupy
+bzr+lp:juju-ci-tools@1941#jujupy

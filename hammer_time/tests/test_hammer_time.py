@@ -1,6 +1,7 @@
 from argparse import Namespace
 from collections import OrderedDict
 from contextlib import contextmanager
+import json
 import os
 from unittest import TestCase
 from unittest.mock import (
@@ -10,7 +11,10 @@ from unittest.mock import (
 
 from jujupy import Status
 from jujupy.client import ProvisioningError
-from jujupy.fake import fake_juju_client
+from jujupy.fake import (
+    fake_juju_client,
+    )
+
 from jujupy.utility import temp_dir
 import yaml
 
@@ -66,6 +70,20 @@ class TestChooseMachine(TestCase):
         with self.assertRaises(InvalidActionError):
             choose_machine(status)
 
+    def test_skip_windows(self):
+        status = Status({'machines': {
+            '0': {'series': 'winfoo'},
+            '1': {'series': 'angsty'},
+            }}, '')
+        for x in range(50):
+            if choose_machine(status, skip_windows=True) == '0':
+                raise AssertionError('Chose windows machine.')
+        status_2 = Status({'machines': {
+            '0': {'series': 'winfoo'},
+            }}, '')
+        with self.assertRaises(InvalidActionError):
+            choose_machine(status_2, skip_windows=True)
+
 
 class TestMachineAction(TestCase):
 
@@ -80,6 +98,25 @@ class TestMachineAction(TestCase):
         client.remove_machine('0')
         parameters = MachineAction.generate_parameters(
             client, client.get_status())
+        self.assertEqual(parameters, {'machine_id': '1'})
+
+    def test_generate_parameters_no_windows(self):
+
+        class MachineActionNoWindows(MachineAction):
+
+            skip_windows = True
+
+        status = Status({'machines': {
+            '1': {'series': 'winfoo'},
+            }}, '')
+        with self.assertRaises(InvalidActionError):
+            parameters = MachineActionNoWindows.generate_parameters(
+                None, status)
+        status_2 = Status({'machines': {
+            '1': {'series': 'wifoo'},
+            }}, '')
+        parameters = MachineActionNoWindows.generate_parameters(
+            None, status_2)
         self.assertEqual(parameters, {'machine_id': '1'})
 
 
@@ -191,9 +228,10 @@ class TestInterruptNetworkAction(TestCase):
         client = fake_juju_client()
         client.bootstrap()
         client.juju('add-machine', ())
-        status = Status({'machines': {'0': {'juju-status': {
-            'current': 'down',
-            }}}}, '')
+        status = Status({'machines': {'0': {
+            'juju-status': { 'current': 'down'},
+            'series': 'angsty',
+            }}}, '')
         with patch.object(client._backend, 'juju',
                           wraps=client._backend.juju) as juju_mock:
             with patch.object(client, 'get_status', return_value=status):
