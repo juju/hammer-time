@@ -12,8 +12,7 @@ from unittest.mock import (
 from jujupy import Status
 from jujupy.client import ProvisioningError
 from jujupy.fake import (
-    fake_juju_client as jujupy_fake_juju_client,
-    FakeBackend,
+    fake_juju_client,
     )
 
 from jujupy.utility import temp_dir
@@ -39,37 +38,6 @@ from hammer_time.hammer_time import (
     RemoveUnitAction,
     run_plan,
     )
-
-
-class FakeBackendWithSeries(FakeBackend):
-
-    def get_juju_output(self, command, args, used_feature_flags, juju_home,
-                        model=None, timeout=None, user_name=None,
-                        merge_stderr=False):
-        if command == 'show-status':
-            if ':' in model:
-                model = model.split(':')[1]
-            model_state = self.controller_state.models[model]
-            status_dict = model_state.get_status_dict()
-            for machine, data in status_dict['machines'].items():
-                data.setdefault('series', 'angsty')
-            # Parsing JSON is much faster than parsing YAML, and JSON is a
-            # subset of YAML, so emit JSON.
-            return json.dumps(status_dict).encode('utf-8')
-
-        return super().get_juju_output(
-            command, args, used_feature_flags, juju_home, model, timeout,
-            user_name, merge_stderr)
-
-
-def fake_juju_client():
-    client = jujupy_fake_juju_client()
-    back = client._backend
-    client._backend = FakeBackendWithSeries(
-        back.controller_state, back.feature_flags, back.version,
-        back.full_path, back.debug, back._past_deadline,
-        )
-    return client
 
 
 def backend_call(client, cmd, args, model=None, check=True, timeout=None,
