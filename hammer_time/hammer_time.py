@@ -104,6 +104,13 @@ class AddRemoveManyContainerAction(MachineAction):
 
     skip_windows = True
 
+    @staticmethod
+    def generate_parameters(client, status):
+        if client.env.provider == 'lxd':
+            raise InvalidActionError('Not supported on LXD provider.')
+        # Can't use super in a staticmethod
+        return MachineAction.generate_parameters(client, status)
+
     def perform(client, machine_id):
         """Add and remove many containers using the cli."""
         old_status = client.get_status()

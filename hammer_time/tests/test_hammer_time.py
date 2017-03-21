@@ -8,7 +8,10 @@ from unittest.mock import (
     patch,
     )
 
-from jujupy import Status
+from jujupy import (
+    JujuData,
+    Status,
+    )
 from jujupy.client import ProvisioningError
 from jujupy.fake import (
     fake_juju_client,
@@ -141,6 +144,16 @@ class TestAddRemoveManyMachineAction(TestCase):
 
 
 class TestAddRemoveManyContainerAction(TestCase):
+
+    def test_generate_parameters_lxd(self):
+        client = fake_juju_client(env=JujuData(
+            'steve', config={'type': 'lxd'}))
+        client.bootstrap()
+        client.juju('add-machine', ())
+        with self.assertRaisesRegex(InvalidActionError,
+                                    'Not supported on LXD provider.'):
+            AddRemoveManyContainerAction.generate_parameters(
+                client, client.get_status())
 
     def test_add_remove_many_container(self):
         client = fake_juju_client()
