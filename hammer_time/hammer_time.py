@@ -134,6 +134,10 @@ class RunAvailable(BaseCondition):
         if exit_status != 0:
             yield (self.machine_id, 'cannot-run')
 
+    def do_raise(self, model_name, status):
+        raise Exception(
+            'Machine {} cannot run commands.'.format(self.machine_id))
+
 
 class KillJujuDAction(MachineAction):
     """Action to kill jujud."""
@@ -154,6 +158,10 @@ class KillJujuDAction(MachineAction):
 
     @classmethod
     def perform(cls, client, machine_id):
+        # Ideally, we'd use 'run' since it queues until the machine is
+        # available.  We can't, because this operation breaks jujud halfway
+        # through.  So instead, we wait until the 'run' operation is
+        # available, but then use 'ssh'.
         client.wait_for(RunAvailable(client, machine_id))
         client.juju('ssh', (machine_id,) + cls.kill_script)
 
@@ -178,6 +186,10 @@ class KillMongoDAction:
     @classmethod
     def perform(cls, client, machine_id):
         ctrl_client = client.get_controller_client()
+        # Ideally, we'd use 'run' since it queues until the machine is
+        # available.  We can't, because this operation breaks jujud halfway
+        # through.  So instead, we wait until the 'run' operation is
+        # available, but then use 'ssh'.
         ctrl_client.wait_for(RunAvailable(client, machine_id))
         ctrl_client.juju('ssh', (machine_id,) + cls.kill_script)
 

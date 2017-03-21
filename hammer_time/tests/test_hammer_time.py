@@ -175,6 +175,31 @@ def perform(cls, client):
     return cls.perform(client, **parameters)
 
 
+class TestRunAvailable(TestCase):
+
+    def test_iter_blocking_state(self):
+        client = fake_juju_client()
+        ra = RunAvailable(client, '0')
+        with patch.object(client._backend, 'juju',
+                          return_value=1) as juju_mock:
+            self.assertEqual([('0', 'cannot-run')],
+                             list(ra.iter_blocking_state(None)))
+            juju_mock.return_value = 0
+            self.assertEqual([],
+                             list(ra.iter_blocking_state(None)))
+        self.assertEqual([backend_call(
+            client, 'run',
+            ('--machine', '0', 'exit 0', '--timeout', '20s'), check=False
+            )] * 2,
+            juju_mock.mock_calls)
+
+    def test_do_raise(self):
+        ra = RunAvailable(None, 'asdf')
+        with self.assertRaisesRegex(Exception,
+                                    'Machine asdf cannot run commands.'):
+            ra.do_raise(None, None)
+
+
 class TestKillJujuDAction(TestCase):
 
     def test_perform(self):
@@ -274,7 +299,7 @@ class TestRebootMachineAction(TestCase):
                          check=False),
             ], juju_mock.mock_calls)
         expected_call = call(
-            'run', ('--machine', '0', 'uptime', '-s'),
+            'run', ('--machine', '0', 'uptime -s'),
             client.used_feature_flags, client.env.juju_home,
             client._cmd_model(True, False),
             user_name='admin')
