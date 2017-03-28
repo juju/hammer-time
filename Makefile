@@ -6,6 +6,9 @@ develop: .develop-canary
 	touch .develop-canary
 
 .python-canary: requirements.txt bin/pip3
+	# When we update revno, pip doesn't consider it an upgrade.  So force a
+	# reinstall.
+	./remove-jujupy
 	bin/pip3 install -r requirements.txt
 	touch .python-canary
 

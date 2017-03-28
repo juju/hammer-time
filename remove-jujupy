@@ -1,0 +1,4 @@
+#!/bin/sh
+if bin/pip3 freeze|grep jujupy; then
+    bin/pip3 uninstall jujupy -y
+fi
