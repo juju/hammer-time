@@ -13,6 +13,7 @@ develop: .develop-canary
 	touch .python-canary
 
 bin/pip3:
+	sudo apt-get install python3-venv
 	python3 -m venv .
 
 lint:
