@@ -58,14 +58,15 @@ def backend_call(client, cmd, args, model=None, check=True, timeout=None,
 class TestChooseMachine(TestCase):
 
     def test_choose_machine(self):
-        chosen = set()
+        chosen = {}
         client = fake_juju_client()
         client.bootstrap()
         client.juju('add-machine', ('-n', '2'))
         status = client.get_status()
         for x in range(50):
-            chosen.add(choose_machine(status))
-            if chosen == {'0', '1'}:
+            machine_id, data = choose_machine(status)
+            chosen[machine_id] = data
+            if set(chosen) == {'0', '1'}:
                 break
         else:
             raise AssertionError('Did not choose each machine.')
@@ -145,6 +146,10 @@ class TestAddRemoveManyMachineAction(TestCase):
             ], juju_mock.mock_calls)
 
 
+def set_hardware(machine_data, mem=2048, root_disk=8192):
+    machine_data['hardware'] = 'mem={}M root-disk={}M'.format(mem, root_disk)
+
+
 class TestAddRemoveManyContainerAction(TestCase):
 
     def test_generate_parameters_lxd(self):
@@ -157,13 +162,41 @@ class TestAddRemoveManyContainerAction(TestCase):
             AddRemoveManyContainerAction.generate_parameters(
                 client, client.get_status())
 
+    def test_generate_parameters_container_count_8(self):
+        client = fake_juju_client(env=JujuData(
+            'steve', config={'type': 'not-lxd', 'region': 'asdf'}))
+        client.bootstrap()
+        client.juju('add-machine', ())
+        status = client.get_status()
+        set_hardware(status.status['machines']['0'], root_disk=18432)
+        params = AddRemoveManyContainerAction.generate_parameters(
+            client, status)
+        self.assertEqual({
+            'machine_id': '0', 'container_count': 8,
+            }, params)
+
+    def test_generate_parameters_container_count_3(self):
+        client = fake_juju_client(env=JujuData(
+            'steve', config={'type': 'not-lxd', 'region': 'asdf'}))
+        client.bootstrap()
+        client.juju('add-machine', ())
+        status = client.get_status()
+        set_hardware(status.status['machines']['0'], root_disk=8192)
+        params = AddRemoveManyContainerAction.generate_parameters(
+            client, status)
+        self.assertEqual({
+            'machine_id': '0', 'container_count': 3,
+            }, params)
+
     def test_add_remove_many_container(self):
         client = fake_juju_client()
         client.bootstrap()
         client.juju('add-machine', ())
         with patch.object(client._backend, 'juju',
                           wraps=client._backend.juju) as juju_mock:
-            perform(AddRemoveManyContainerAction, client)
+            status = client.get_status()
+            set_hardware(status.status['machines']['0'], root_disk=18432)
+            perform(AddRemoveManyContainerAction, client, status)
         self.assertEqual([
             backend_call(client, 'add-machine', ('lxd:0')),
             backend_call(client, 'add-machine', ('lxd:0')),
@@ -184,9 +217,11 @@ class TestAddRemoveManyContainerAction(TestCase):
             ], juju_mock.mock_calls)
 
 
-def perform(cls, client):
+def perform(cls, client, status=None):
     """Generate parameters and then perform with them."""
-    parameters = cls.generate_parameters(client, client.get_status())
+    if status is None:
+        status = client.get_status()
+    parameters = cls.generate_parameters(client, status)
     return cls.perform(client, **parameters)
 
 
