@@ -1,6 +1,8 @@
 from argparse import Namespace
 from collections import OrderedDict
 from contextlib import contextmanager
+from io import StringIO
+import logging
 import os
 from unittest import TestCase
 from unittest.mock import (
@@ -486,6 +488,19 @@ class Step():
             return RaiseCondition
 
 
+@contextmanager
+def log_string_io():
+    """Temporarily log to a StringIO."""
+    log_stream = StringIO()
+    handler = logging.StreamHandler(log_stream)
+    root_logger = logging.getLogger()
+    root_logger.addHandler(handler)
+    try:
+        yield log_stream
+    finally:
+        root_logger.removeHandler(handler)
+
+
 class TestActions(TestCase):
 
     def test_list_arbitrary_actions(self):
@@ -550,6 +565,23 @@ class TestActions(TestCase):
         actions = Actions({'step': step})
         actions.perform_step(cur_client, {'step': {'bar': 'baz'}})
         self.assertIs(True, step.performed)
+
+    def test_perform_step_logs(self):
+
+        cur_client = object()
+
+        class TwoParamStep(Step):
+
+            def perform(self, client, bar, qux):
+                super().perform(client, bar)
+
+        step = TwoParamStep(self, cur_client)
+        actions = Actions({'mystep': step})
+        with log_string_io() as log_stream:
+            actions.perform_step(cur_client, {'mystep': {'bar': 'baz',
+                                                         'qux': 'quxx'}})
+        self.assertEqual("Performing step: mystep(bar='baz', qux='quxx')\n",
+                         log_stream.getvalue())
 
 
 @contextmanager

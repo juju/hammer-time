@@ -346,6 +346,9 @@ class Actions:
     def perform_step(self, client, step):
         """Perform an action formatted as a step dictionary."""
         ((name, parameters),) = step.items()
+        param_str = ', '.join('{}={}'.format(k, repr(v)) for k, v in
+                              sorted(parameters.items()))
+        logging.info('Performing step: {}({})'.format(name, param_str))
         return self._actions[name].perform(client, **parameters)
 
     def do_step(self, client, step):
