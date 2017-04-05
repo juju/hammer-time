@@ -5,6 +5,7 @@ from random import (
     shuffle,
     )
 import logging
+import re
 import subprocess
 import sys
 
@@ -51,14 +52,13 @@ def choose_machine(status, skip_windows=False):
     :return: a machine-id.
     :raises: InvalidActionError if there are no machines to choose from.
     """
-    machines = status.iter_machines(containers=False)
+    machines = list(status.iter_machines(containers=False))
     if skip_windows:
         machines = [(m, d) for m, d in machines
                     if not d['series'].startswith('win')]
-    machine_ids = [m for m, d in machines]
-    if len(machine_ids) == 0:
+    if len(machines) == 0:
         raise InvalidActionError('No machines to choose from.')
-    return choice(machine_ids)
+    return choice(machines)
 
 
 class MachineAction:
@@ -67,8 +67,13 @@ class MachineAction:
     skip_windows = False
 
     @classmethod
+    def choose_machine(cls, status):
+        return choose_machine(status, cls.skip_windows)
+
+    @classmethod
     def generate_parameters(cls, client, status):
-        return {'machine_id': choose_machine(status, cls.skip_windows)}
+        machine_id = cls.choose_machine(status)[0]
+        return {'machine_id': machine_id}
 
 
 class RebootMachineAction(MachineAction):
@@ -99,19 +104,35 @@ class RebootMachineAction(MachineAction):
             raise AssertionError('Unable to retrieve uptime.')
 
 
+def parse_hardware(machine_data):
+    hardware = {}
+    for item in machine_data['hardware'].split(' '):
+        key, value = item.split('=', 1)
+        hardware[key] = value
+    return hardware
+
+
 class AddRemoveManyContainerAction(MachineAction):
     """Action to add many containers, then remove them."""
 
     skip_windows = True
 
-    @staticmethod
-    def generate_parameters(client, status):
+    space_per_instance = 2048
+
+    @classmethod
+    def generate_parameters(cls, client, status):
         if client.env.provider == 'lxd':
             raise InvalidActionError('Not supported on LXD provider.')
-        # Can't use super in a staticmethod
-        return MachineAction.generate_parameters(client, status)
+        machine_id, data = cls.choose_machine(status)
+        hardware = parse_hardware(data)
+        root_space = int(re.match('^(\d+)M$', hardware['root-disk']).group(1))
+        container_count = (root_space // cls.space_per_instance) - 1
+        return {
+            'container_count': container_count,
+            'machine_id': machine_id,
+            }
 
-    def perform(client, machine_id):
+    def perform(client, machine_id, container_count):
         """Add and remove many containers using the cli."""
         old_status = client.get_status()
         for count in range(8):
@@ -188,7 +209,7 @@ class KillMongoDAction:
 
     def generate_parameters(client, status):
         ctrl_client = client.get_controller_client()
-        return {'machine_id': choose_machine(ctrl_client.get_status())}
+        return {'machine_id': choose_machine(ctrl_client.get_status())[0]}
 
     @classmethod
     def perform(cls, client, machine_id):
