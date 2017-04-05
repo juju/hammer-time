@@ -135,7 +135,7 @@ class AddRemoveManyContainerAction(MachineAction):
     def perform(client, machine_id, container_count):
         """Add and remove many containers using the cli."""
         old_status = client.get_status()
-        for count in range(8):
+        for count in range(container_count):
             client.juju('add-machine', ('lxd:{}'.format(machine_id)))
         client.wait_for_started()
         new_status = client.get_status()

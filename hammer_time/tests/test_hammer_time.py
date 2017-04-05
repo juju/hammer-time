@@ -195,10 +195,9 @@ class TestAddRemoveManyContainerAction(TestCase):
         with patch.object(client._backend, 'juju',
                           wraps=client._backend.juju) as juju_mock:
             status = client.get_status()
-            set_hardware(status.status['machines']['0'], root_disk=18432)
+            set_hardware(status.status['machines']['0'], root_disk=16384)
             perform(AddRemoveManyContainerAction, client, status)
         self.assertEqual([
-            backend_call(client, 'add-machine', ('lxd:0')),
             backend_call(client, 'add-machine', ('lxd:0')),
             backend_call(client, 'add-machine', ('lxd:0')),
             backend_call(client, 'add-machine', ('lxd:0')),
@@ -213,7 +212,6 @@ class TestAddRemoveManyContainerAction(TestCase):
             backend_call(client, 'remove-machine', ('0/lxd/4',)),
             backend_call(client, 'remove-machine', ('0/lxd/5',)),
             backend_call(client, 'remove-machine', ('0/lxd/6',)),
-            backend_call(client, 'remove-machine', ('0/lxd/7',)),
             ], juju_mock.mock_calls)
 
 
