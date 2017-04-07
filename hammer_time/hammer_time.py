@@ -126,7 +126,14 @@ class AddRemoveManyContainerAction(MachineAction):
         machine_id, data = cls.choose_machine(status)
         hardware = parse_hardware(data)
         root_space = int(re.match('^(\d+)M$', hardware['root-disk']).group(1))
-        container_count = (root_space // cls.space_per_instance) - 1
+        # Allocate only as many containers as will fit on the host.
+        # Ensure each instance has cls.space_per_instance.  Subtract 1 for the
+        # host.
+        # Due to kernel limitations, restrict to 10 containers.  (Actual limit
+        # is ~13).
+        container_count = min((root_space // cls.space_per_instance) - 1, 10)
+        if container_count == 0:
+            raise InvalidActionError('No space for containers.')
         return {
             'container_count': container_count,
             'machine_id': machine_id,

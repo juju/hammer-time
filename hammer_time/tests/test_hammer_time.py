@@ -188,6 +188,30 @@ class TestAddRemoveManyContainerAction(TestCase):
             'machine_id': '0', 'container_count': 3,
             }, params)
 
+    def test_generate_parameters_container_max_10(self):
+        client = fake_juju_client(env=JujuData(
+            'steve', config={'type': 'not-lxd', 'region': 'asdf'}))
+        client.bootstrap()
+        client.juju('add-machine', ())
+        status = client.get_status()
+        set_hardware(status.status['machines']['0'], root_disk=32768)
+        params = AddRemoveManyContainerAction.generate_parameters(
+            client, status)
+        self.assertEqual({
+            'machine_id': '0', 'container_count': 10,
+            }, params)
+
+    def test_generate_parameters_container_max_10(self):
+        client = fake_juju_client(env=JujuData(
+            'steve', config={'type': 'not-lxd', 'region': 'asdf'}))
+        client.bootstrap()
+        client.juju('add-machine', ())
+        status = client.get_status()
+        set_hardware(status.status['machines']['0'], root_disk=2048)
+        with self.assertRaisesRegex(InvalidActionError,
+                                    'No space for containers.'):
+            AddRemoveManyContainerAction.generate_parameters(client, status)
+
     def test_add_remove_many_container(self):
         client = fake_juju_client()
         client.bootstrap()
