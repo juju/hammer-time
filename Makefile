@@ -17,9 +17,9 @@ bin/pip3:
 	python3 -m venv .
 
 lint:
-	flake8 hammer_time
+	flake8 hammertime
 
 test:
-	bin/nosetests hammer_time -v
+	bin/nosetests hammertime -v
 
 .PHONY: lint test develop
