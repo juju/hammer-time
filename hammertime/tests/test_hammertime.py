@@ -29,7 +29,6 @@ from hammertime.hammertime import (
     AddRemoveManyMachineAction,
     AddUnitAction,
     checked_client,
-    choose_machine,
     default_actions,
     InterruptNetworkAction,
     InvalidActionError,
@@ -38,6 +37,7 @@ from hammertime.hammertime import (
     MachineAction,
     NoValidActionsError,
     parse_args,
+    parse_hardware,
     replay,
     RunAvailable,
     run_random,
@@ -55,45 +55,11 @@ def backend_call(client, cmd, args, model=None, check=True, timeout=None,
                 timeout, extra_env, suppress_err=False)
 
 
-class TestChooseMachine(TestCase):
-
-    def test_choose_machine(self):
-        chosen = {}
-        client = fake_juju_client()
-        client.bootstrap()
-        client.juju('add-machine', ('-n', '2'))
-        status = client.get_status()
-        for x in range(50):
-            machine_id, data = choose_machine(status)
-            chosen[machine_id] = data
-            if set(chosen) == {'0', '1'}:
-                break
-        else:
-            raise AssertionError('Did not choose each machine.')
-
-    def test_no_machines(self):
-        client = fake_juju_client()
-        client.bootstrap()
-        status = client.get_status()
-        with self.assertRaises(InvalidActionError):
-            choose_machine(status)
-
-    def test_skip_windows(self):
-        status = Status({'machines': {
-            '0': {'series': 'winfoo'},
-            '1': {'series': 'angsty'},
-            }}, '')
-        for x in range(50):
-            if choose_machine(status, skip_windows=True) == '0':
-                raise AssertionError('Chose windows machine.')
-        status_2 = Status({'machines': {
-            '0': {'series': 'winfoo'},
-            }}, '')
-        with self.assertRaises(InvalidActionError):
-            choose_machine(status_2, skip_windows=True)
-
-
 class TestMachineAction(TestCase):
+
+    class MachineActionNoWindows(MachineAction):
+
+        skip_windows = True
 
     def test_generate_parameters(self):
         client = fake_juju_client()
@@ -110,22 +76,53 @@ class TestMachineAction(TestCase):
 
     def test_generate_parameters_no_windows(self):
 
-        class MachineActionNoWindows(MachineAction):
-
-            skip_windows = True
-
         status = Status({'machines': {
             '1': {'series': 'winfoo'},
             }}, '')
         with self.assertRaises(InvalidActionError):
-            parameters = MachineActionNoWindows.generate_parameters(
+            parameters = self.MachineActionNoWindows.generate_parameters(
                 None, status)
         status_2 = Status({'machines': {
             '1': {'series': 'wifoo'},
             }}, '')
-        parameters = MachineActionNoWindows.generate_parameters(
+        parameters = self.MachineActionNoWindows.generate_parameters(
             None, status_2)
         self.assertEqual(parameters, {'machine_id': '1'})
+
+    def test_choose_machine(self):
+        chosen = {}
+        client = fake_juju_client()
+        client.bootstrap()
+        client.juju('add-machine', ('-n', '2'))
+        status = client.get_status()
+        for x in range(50):
+            machine_id, data = MachineAction.choose_machine(status)
+            chosen[machine_id] = data
+            if set(chosen) == {'0', '1'}:
+                break
+        else:
+            raise AssertionError('Did not choose each machine.')
+
+    def test_no_machines(self):
+        client = fake_juju_client()
+        client.bootstrap()
+        status = client.get_status()
+        with self.assertRaises(InvalidActionError):
+            MachineAction.choose_machine(status)
+
+    def test_skip_windows(self):
+        status = Status({'machines': {
+            '0': {'series': 'winfoo'},
+            '1': {'series': 'angsty'},
+            }}, '')
+        for x in range(50):
+            if self.MachineActionNoWindows.choose_machine(status) == '0':
+                raise AssertionError('Chose windows machine.')
+        status_2 = Status({'machines': {
+            '0': {'series': 'winfoo'},
+            }}, '')
+        with self.assertRaises(InvalidActionError):
+            self.MachineActionNoWindows.choose_machine(status_2)
 
 
 class TestAddRemoveManyMachineAction(TestCase):
@@ -144,6 +141,19 @@ class TestAddRemoveManyMachineAction(TestCase):
             backend_call(client, 'remove-machine', ('3',)),
             backend_call(client, 'remove-machine', ('4',)),
             ], juju_mock.mock_calls)
+
+
+class TestParseHardware(TestCase):
+
+    def test_parse_hardware(self):
+        machine_data = {}
+        self.assertIs(parse_hardware(machine_data), None)
+        set_hardware(machine_data)
+        self.assertEqual(parse_hardware(machine_data),
+                         {'mem': '2048M', 'root-disk': '8192M'})
+        set_hardware(machine_data, root_disk=2048, mem='8192')
+        self.assertEqual(parse_hardware(machine_data),
+                         {'mem': '8192M', 'root-disk': '2048M'})
 
 
 def set_hardware(machine_data, mem=2048, root_disk=8192):
@@ -209,7 +219,17 @@ class TestAddRemoveManyContainerAction(TestCase):
         status = client.get_status()
         set_hardware(status.status['machines']['0'], root_disk=2048)
         with self.assertRaisesRegex(InvalidActionError,
-                                    'No space for containers.'):
+                                    'No suitable machines.'):
+            AddRemoveManyContainerAction.generate_parameters(client, status)
+
+    def test_generate_parameters_container_no_hardware(self):
+        client = fake_juju_client(env=JujuData(
+            'steve', config={'type': 'not-lxd', 'region': 'asdf'}))
+        client.bootstrap()
+        client.juju('add-machine', ())
+        status = client.get_status()
+        with self.assertRaisesRegex(InvalidActionError,
+                                    'No suitable machines.'):
             AddRemoveManyContainerAction.generate_parameters(client, status)
 
     def test_add_remove_many_container(self):

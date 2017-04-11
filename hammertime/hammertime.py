@@ -43,32 +43,25 @@ class AddRemoveManyMachineAction:
         remove_and_wait(client, new_status.iter_new_machines(old_status))
 
 
-def choose_machine(status, skip_windows=False):
-    """Choose a machine from the client's model at random.
-
-    :param client: The ModelClient to get machines for.
-    :param skip_windows: If true, skip Windows machines when choosing the
-        client.
-    :return: a machine-id.
-    :raises: InvalidActionError if there are no machines to choose from.
-    """
-    machines = list(status.iter_machines(containers=False))
-    if skip_windows:
-        machines = [(m, d) for m, d in machines
-                    if not d['series'].startswith('win')]
-    if len(machines) == 0:
-        raise InvalidActionError('No machines to choose from.')
-    return choice(machines)
-
-
 class MachineAction:
     """Base class for actions that operate on machines."""
 
     skip_windows = False
 
     @classmethod
+    def machine_suitable(cls, machine_data):
+        return bool(
+            not cls.skip_windows or not
+            machine_data['series'].startswith('win'))
+
+    @classmethod
     def choose_machine(cls, status):
-        return choose_machine(status, cls.skip_windows)
+        machines = list(status.iter_machines(containers=False))
+        machines = [(m, d) for m, d in machines
+                    if cls.machine_suitable(d)]
+        if len(machines) == 0:
+            raise InvalidActionError('No suitable machines.')
+        return choice(machines)
 
     @classmethod
     def generate_parameters(cls, client, status):
@@ -106,7 +99,10 @@ class RebootMachineAction(MachineAction):
 
 def parse_hardware(machine_data):
     hardware = {}
-    for item in machine_data['hardware'].split(' '):
+    hardware_str = machine_data.get('hardware')
+    if hardware_str is None:
+        return None
+    for item in hardware_str.split(' '):
         key, value = item.split('=', 1)
         hardware[key] = value
     return hardware
@@ -125,19 +121,33 @@ class AddRemoveManyContainerAction(MachineAction):
             raise InvalidActionError('Not supported on LXD provider.')
         machine_id, data = cls.choose_machine(status)
         hardware = parse_hardware(data)
+        container_count = cls.calculate_containers(hardware)
+        return {
+            'container_count': container_count,
+            'machine_id': machine_id,
+            }
+
+    @classmethod
+    def calculate_containers(cls, hardware):
         root_space = int(re.match('^(\d+)M$', hardware['root-disk']).group(1))
         # Allocate only as many containers as will fit on the host.
         # Ensure each instance has cls.space_per_instance.  Subtract 1 for the
         # host.
         # Due to kernel limitations, restrict to 10 containers.  (Actual limit
         # is ~13).
-        container_count = min((root_space // cls.space_per_instance) - 1, 10)
-        if container_count == 0:
-            raise InvalidActionError('No space for containers.')
-        return {
-            'container_count': container_count,
-            'machine_id': machine_id,
-            }
+        return min((root_space // cls.space_per_instance) - 1, 10)
+
+    @classmethod
+    def machine_suitable(cls, machine_data):
+        if not MachineAction.machine_suitable(machine_data):
+            return False
+        hardware = parse_hardware(machine_data)
+        if hardware is None:
+            return False
+        container_count = cls.calculate_containers(hardware)
+        if container_count < 1:
+            return False
+        return True
 
     def perform(client, machine_id, container_count):
         """Add and remove many containers using the cli."""
@@ -201,7 +211,7 @@ class KillJujuDAction(MachineAction):
         client.juju('ssh', (machine_id,) + cls.kill_script)
 
 
-class KillMongoDAction:
+class KillMongoDAction(MachineAction):
     """Action to kill mongod.  This must operate on controller machine."""
 
     kill_script = (
@@ -214,9 +224,10 @@ class KillMongoDAction:
         'echo',
         )
 
-    def generate_parameters(client, status):
+    @classmethod
+    def generate_parameters(cls, client, status):
         ctrl_client = client.get_controller_client()
-        return {'machine_id': choose_machine(ctrl_client.get_status())[0]}
+        return {'machine_id': cls.choose_machine(ctrl_client.get_status())[0]}
 
     @classmethod
     def perform(cls, client, machine_id):
