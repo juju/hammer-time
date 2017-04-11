@@ -145,7 +145,7 @@ class AddRemoveManyContainerAction(MachineAction):
         if hardware is None:
             return False
         container_count = cls.calculate_containers(hardware)
-        if container_count == 0:
+        if container_count < 1:
             return False
         return True
 
