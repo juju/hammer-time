@@ -2,12 +2,13 @@ import os
 from setuptools import setup, find_packages
 
 SETUP = {
-    'name': "hammer-time",
+    'name': "hammertime",
     'packages': find_packages(),
-    'version': "0.1.0",
+    'version': "0.1.1",
     'entry_points': {
         'console_scripts': [
-            'hammer-time = hammer_time.hammer_time:main',
+            'hammertime = hammertime.hammertime:main',
+            'hammer-time = hammertime.hammertime:main',
         ]
     },
     # Note: requirements.txt has the correct values to install these packages.

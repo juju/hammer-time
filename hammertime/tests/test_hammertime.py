@@ -22,8 +22,8 @@ from jujupy.fake import (
 from jujupy.utility import temp_dir
 import yaml
 
-from hammer_time import hammer_time as ht
-from hammer_time.hammer_time import (
+from hammertime import hammertime as ht
+from hammertime.hammertime import (
     Actions,
     AddRemoveManyContainerAction,
     AddRemoveManyMachineAction,
@@ -201,7 +201,7 @@ class TestAddRemoveManyContainerAction(TestCase):
             'machine_id': '0', 'container_count': 10,
             }, params)
 
-    def test_generate_parameters_container_max_10(self):
+    def test_generate_parameters_container_no_space(self):
         client = fake_juju_client(env=JujuData(
             'steve', config={'type': 'not-lxd', 'region': 'asdf'}))
         client.bootstrap()
@@ -645,7 +645,7 @@ class TestActions(TestCase):
 def client_and_plan():
     cur_client = fake_juju_client()
     cur_client.bootstrap()
-    with patch('hammer_time.hammer_time.client_for_existing',
+    with patch('hammertime.hammertime.client_for_existing',
                return_value=cur_client, autospec=True) as cfe_mock:
         with temp_dir() as plan_dir:
             plan_file = os.path.join(plan_dir, 'asdf.yaml')
@@ -655,7 +655,7 @@ def client_and_plan():
 @contextmanager
 def patch_actions(action_list):
     actions = FixedOrderActions(action_list)
-    with patch('hammer_time.hammer_time.default_actions',
+    with patch('hammertime.hammertime.default_actions',
                autospec=True, return_value=actions):
         yield actions
 
@@ -708,7 +708,7 @@ class TestRunRandom(TestCase):
 
     def test_run_random_unsafe_true(self):
         with client_and_plan() as (cur_client, cfe_mock, plan_file):
-            with patch('hammer_time.hammer_time.default_actions',
+            with patch('hammertime.hammertime.default_actions',
                        wraps=default_actions) as da_mock:
                 with patch.object(RunAvailable, 'iter_blocking_state',
                                   return_value=iter([])):
@@ -717,14 +717,14 @@ class TestRunRandom(TestCase):
 
     def test_run_random_unsafe_false(self):
         with client_and_plan() as (cur_client, cfe_mock, plan_file):
-            with patch('hammer_time.hammer_time.default_actions',
+            with patch('hammertime.hammertime.default_actions',
                        wraps=default_actions) as da_mock:
                 run_random(plan_file, 'fasd', None, 3, None, unsafe=False)
         da_mock.assert_called_once_with(False)
 
     def test_run_random_unsafe_force_action(self):
         with client_and_plan() as (cur_client, cfe_mock, plan_file):
-            with patch('hammer_time.hammer_time.default_actions',
+            with patch('hammertime.hammertime.default_actions',
                        wraps=default_actions) as da_mock:
                 with patch.object(RunAvailable, 'iter_blocking_state',
                                   return_value=iter([])):
@@ -794,7 +794,7 @@ class TestRunPlan(TestCase):
         step = Step(self, client, wait_for=wait_for)
         actions = Actions({'step': step})
         plan = [{'step': {'bar': 'baz'}}]
-        with patch('hammer_time.hammer_time.default_actions',
+        with patch('hammertime.hammertime.default_actions',
                    autospec=True, return_value=actions):
             yield client, plan, step
 
